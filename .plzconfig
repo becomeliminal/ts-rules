@@ -1,0 +1,44 @@
+[please]
+version = >=17.27.0
+
+[PluginDefinition]
+Name = ts
+
+[PluginConfig "compiler"]
+ConfigKey = Compiler
+DefaultValue = ///ts//third_party/js:compiler
+Help = node_modules tree holding the TypeScript compiler. Kept separate from the consumer's tree so the plugin pins its own version, and so a second TypeScript can coexist: TS 7 has no stable programmatic API until 7.1, which typescript-eslint and Astro's checker need.
+Inherit = true
+
+[PluginConfig "compiler_package"]
+ConfigKey = CompilerPackage
+DefaultValue = typescript
+Help = npm package within the compiler tree that publishes the compiler.
+Inherit = true
+
+[PluginConfig "compiler_bin"]
+ConfigKey = CompilerBin
+DefaultValue = tsc
+Help = Executable that package publishes.
+Inherit = true
+
+[Plugin "js"]
+Target = //plugins:js
+; js-rules' own toolchain target lives in its subrepo and would need the node
+; plugin registered there. A consumer supplies its own, which is the honest
+; shape: the toolchain belongs to the repo being built.
+NodeTool = //third_party/node:node|node
+; This plugin's own fixtures have no third-party dependencies, so there is no
+; consumer tree to point at. A repo using ts-rules sets this to its own.
+NodeModules =
+
+[Plugin "node"]
+Target = //plugins:node
+
+[Plugin "go"]
+Target = //plugins:go
+gotool = ///js//third_party/go:gotool|go
+
+; No [Parse] preloadsubincludes: that config ships to every consumer, so
+; anything preloaded here becomes a requirement on any repo that parses a
+; package of this plugin. rust-rules documents avoiding it for the same reason.

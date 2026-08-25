@@ -1,0 +1,28 @@
+# A consumer tree, separate from the compiler's. This is the half of the
+# two-tree design that the compiler tree does not exercise: a first-party
+# library resolving a third-party package's types.
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    dependencies:
+      '@types/node':
+        specifier: 22.18.13
+        version: 22.18.13
+
+packages:
+
+  '@types/node@22.18.13':
+    resolution: {integrity: sha512-Bo45YKIjnmFtv6I1TuC8AaHBbqXtIo+Om5fE4QiU1Tj8QR/qt+8O3BAtOimG5IFmwaWiPmB3Mv3jtYzBA4Us2A==}
+
+  'undici-types@6.21.0':
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
+snapshots:
+
+  '@types/node@22.18.13':
+    dependencies:
+      undici-types: 6.21.0
+
+  'undici-types@6.21.0': {}
