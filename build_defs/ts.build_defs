@@ -1,0 +1,160 @@
+"""TypeScript for Please.
+
+ts_library is a peer of js_library, not a client of it: it emits the same
+<name>/pkg + <name>/lib.json shape, so a js_binary consumes it with no change to
+js-rules. Declarations sit beside the JavaScript inside pkg/, which is what a
+published npm package looks like and what a downstream type-check reads.
+
+The compiler runs from its own node_modules tree, separate from the one holding
+the code being compiled. That is not incidental: TypeScript 7 has no stable
+programmatic API until 7.1, so typescript-eslint and the Vue, Svelte and Astro
+checkers still need a 5.x, and one tree cannot hold two packages claiming the
+name "typescript". Keeping the compiler's tree separate means this plugin pins
+its own version without that pin reaching into a consumer's lockfile.
+
+Both trees resolve correctly because of how the store is laid out: a package's
+dependencies are siblings inside its own store entry, so node resolving from the
+compiler's own path finds its native binary without ever walking up to the
+consumer's tree, while the consumer's imports resolve upward from the staged
+sources. The two walks cannot see each other.
+"""
+
+# CONFIG.JS is scoped to files that have loaded the js plugin, and these rules
+# defer to its node toolchain, companion tool and node_modules tree rather than
+# redeclaring them.
+subinclude("///js//build_defs:js")
+
+
+def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str="",
+               entry:str="index.ts", root:str="", tsconfig:str="tsconfig.json",
+               tsconfig_deps:list=[],
+               module_type:str="", compiler:str="", node_modules:str="",
+               args:list=[], visibility:list=None,
+               test_only:bool&testonly=False, labels:list=[]):
+    """A first-party TypeScript library.
+
+    Args:
+        name: Target name.
+        srcs: .ts, .tsx and .d.ts sources compiled by the TypeScript compiler.
+        deps: Other ts_library or js_library targets, and npm_repo targets.
+        assets: Files copied into the package verbatim and never shown to the
+                compiler. tsc does not copy a .css a component imports, but the
+                placed package still needs it there.
+        package: The name source code imports this by. Defaults to the package
+                 path, as a Go import path mirrors its directory.
+        entry: The source the package resolves to. index.ts gives main
+               index.js and types index.d.ts.
+        root: The prefix stripped from sources, and the compiler's --rootDir.
+              Defaults to the package directory.
+
+              Passed explicitly rather than inferred, and that matters: given
+              only an output directory the compiler derives the root from the
+              common prefix of its inputs, so adding one file at the top of a
+              package would shift every emitted path -- and therefore every
+              import path in node_modules. It would work for months and then
+              break when someone added a file.
+        tsconfig: The project's tsconfig.
+        tsconfig_deps: The configs it extends, directly or transitively.
+
+                       Listed rather than discovered: `extends` is resolved by
+                       the compiler relative to the config naming it, and Please
+                       stages sources at their real paths, so naming the chain
+                       is all it takes -- nothing is parsed and no path is
+                       rewritten. A filegroup cannot do this, because two files
+                       both called tsconfig.json would collide on basename.
+        module_type: The package.json "type" field. Stated here rather than read
+                     out of the tsconfig, so nothing in this plugin parses one.
+        compiler: node_modules tree holding the compiler. Defaults to the
+                  Compiler config.
+        node_modules: The tree the sources resolve their imports through.
+                      Defaults to js-rules' NodeModules config.
+        args: Additional compiler flags. The flags this rule's output contract
+              depends on -- outDir, rootDir, declaration, noEmit and
+              tsBuildInfoFile -- are set here and cannot be overridden.
+        visibility: Visibility specification.
+        test_only: If True, only visible to test rules.
+        labels: Additional labels.
+    """
+    package = package or package_name()
+    # Same constraint as js_library: the emitted package is imported by name,
+    # and node's rules for a name are narrower than a path.
+    check_package_name(package, name)
+    root = root or package_name()
+    compiler = compiler or CONFIG.TS.COMPILER
+    node_modules = node_modules or CONFIG.JS.NODE_MODULES
+
+    main = entry.replace(".tsx", ".js").replace(".ts", ".js")
+    types = entry.replace(".tsx", ".d.ts").replace(".ts", ".d.ts")
+    strip = (root + "/") if root else ""
+
+    # A scratch directory at the staging root, so no `include` glob rooted at
+    # the package can reach the compiler's own output.
+    out_dir = "_ts_out"
+
+    set_flags = f"--set type={module_type}" if module_type else ""
+
+    return build_rule(
+        name = name,
+        srcs = {
+            "srcs": srcs,
+            "assets": assets,
+            "config": [tsconfig],
+            "extends": tsconfig_deps,
+            "modules": [node_modules] if node_modules else [],
+            "compiler": [compiler],
+        },
+        outs = [name],
+        cmd = " && ".join([
+            'TOOL=$(readlink -f "$TOOLS_TOOL")',
+            'NODE=$(readlink -f "$TOOLS_NODE")',
+
+            # The compiler's tree and the sources' tree, kept apart.
+            'mkdir -p _compiler',
+            'cp -R "$SRCS_COMPILER/." _compiler/',
+            # Every first-party library staged here describes itself, so the set
+            # is collected by shape. node_modules is pruned: without it the walk
+            # covers the whole dependency tree twice.
+            'LIBS=$(find . -name node_modules -prune -o -name lib.json -print | ' +
+            'while read m; do printf -- "--lib %s:%s " "$m" "$(dirname "$m")/pkg"; done)',
+            # A repo whose first-party code has no third-party dependencies has
+            # no consumer tree at all, and the overlay makes an empty one.
+            '"$TOOL" overlay --tree "${SRCS_MODULES:-}" --out node_modules $LIBS',
+
+            # Run from the staging root: node_modules is then an ancestor of the
+            # sources, which is what the compiler's upward resolution needs, and
+            # diagnostics come out as pkg/file.ts(3,14) -- the repo path, which
+            # an editor can open -- rather than a bare filename.
+            f'BIN=$(readlink -f "$("$TOOL" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
+            " ".join([
+                '"$NODE" "$BIN" -p "$SRCS_CONFIG"',
+                f"--rootDir {root} --outDir {out_dir}",
+                "--declaration --noEmit false --emitDeclarationOnly false",
+                "--tsBuildInfoFile _tsbuildinfo",
+            ] + args),
+
+            # Assemble the shape js_library produces, so a js_binary consumes it
+            # without knowing TypeScript was involved.
+            'mkdir -p "$OUT/pkg"',
+            f'cp -R {out_dir}/. "$OUT/pkg/"',
+            f'for a in ${SRCS_ASSETS:-}; do mkdir -p "$OUT/pkg/$(dirname "${{a#{strip}}}")" && cp "$a" "$OUT/pkg/${{a#{strip}}}"; done',
+            " ".join([
+                '"$TOOL" describe',
+                f"--name {name} --package {package} --version 0.0.0",
+                f"--main {main} --types {types}",
+                set_flags,
+                '--dir "$OUT/pkg" --out "$OUT/lib.json"',
+            ]),
+        ]),
+        tools = {
+            "tool": [CONFIG.JS.PLEASE_JS_TOOL],
+            "node": [CONFIG.JS.NODE_TOOL],
+        },
+        deps = deps,
+        exported_deps = deps,
+        needs_transitive_deps = True,
+        visibility = visibility,
+        test_only = test_only,
+        labels = labels + [f"js_library:{package}", f"ts_library:{package}"],
+        building_description = "Compiling...",
+    )
+
