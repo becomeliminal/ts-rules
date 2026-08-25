@@ -105,7 +105,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
         },
         outs = [name],
         cmd = " && ".join([
-            'TOOL=$(readlink -f "$TOOLS_TOOL")',
+            'PLEASE_JS=$(readlink -f "$TOOLS_PLEASE_JS")',
             'NODE=$(readlink -f "$TOOLS_NODE")',
 
             # The compiler's tree and the sources' tree, kept apart.
@@ -118,13 +118,13 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             'while read m; do printf -- "--lib %s:%s " "$m" "$(dirname "$m")/pkg"; done)',
             # A repo whose first-party code has no third-party dependencies has
             # no consumer tree at all, and the overlay makes an empty one.
-            '"$TOOL" overlay --tree "${SRCS_MODULES:-}" --out node_modules $LIBS',
+            '"$PLEASE_JS" overlay --tree "${SRCS_MODULES:-}" --out node_modules $LIBS',
 
             # Run from the staging root: node_modules is then an ancestor of the
             # sources, which is what the compiler's upward resolution needs, and
             # diagnostics come out as pkg/file.ts(3,14) -- the repo path, which
             # an editor can open -- rather than a bare filename.
-            f'BIN=$(readlink -f "$("$TOOL" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
+            f'BIN=$(readlink -f "$("$PLEASE_JS" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
             " ".join([
                 '"$NODE" "$BIN" -p "$SRCS_CONFIG"',
                 f"--rootDir {root} --outDir {out_dir}",
@@ -138,7 +138,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             f'cp -R {out_dir}/. "$OUT/pkg/"',
             f'for a in ${SRCS_ASSETS:-}; do mkdir -p "$OUT/pkg/$(dirname "${{a#{strip}}}")" && cp "$a" "$OUT/pkg/${{a#{strip}}}"; done',
             " ".join([
-                '"$TOOL" describe',
+                '"$PLEASE_JS" describe',
                 f"--name {name} --package {package} --version 0.0.0",
                 f"--main {main} --types {types}",
                 set_flags,
@@ -146,7 +146,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             ]),
         ]),
         tools = {
-            "tool": [CONFIG.JS.PLEASE_JS_TOOL],
+            "please_js": [CONFIG.JS.PLEASE_JS_TOOL],
             "node": [CONFIG.JS.NODE_TOOL],
         },
         deps = deps,
@@ -214,14 +214,14 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
         # failure to stage a source shows up as a missing name here.
         outs = [name + ".checked"],
         cmd = " && ".join([
-            'TOOL=$(readlink -f "$TOOLS_TOOL")',
+            'PLEASE_JS=$(readlink -f "$TOOLS_PLEASE_JS")',
             'NODE=$(readlink -f "$TOOLS_NODE")',
             'mkdir -p _compiler',
             'cp -R "$SRCS_COMPILER/." _compiler/',
             'LIBS=$(find . -name node_modules -prune -o -name lib.json -print | ' +
             'while read m; do printf -- "--lib %s:%s " "$m" "$(dirname "$m")/pkg"; done)',
-            '"$TOOL" overlay --tree "${SRCS_MODULES:-}" --out node_modules $LIBS',
-            f'BIN=$(readlink -f "$("$TOOL" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
+            '"$PLEASE_JS" overlay --tree "${SRCS_MODULES:-}" --out node_modules $LIBS',
+            f'BIN=$(readlink -f "$("$PLEASE_JS" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
             " ".join([
                 '"$NODE" "$BIN" -p "$SRCS_CONFIG" --noEmit',
                 "--tsBuildInfoFile _tsbuildinfo",
@@ -229,7 +229,7 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
             'for s in $SRCS_SRCS; do echo "$s"; done > "$OUT"',
         ]),
         tools = {
-            "tool": [CONFIG.JS.PLEASE_JS_TOOL],
+            "please_js": [CONFIG.JS.PLEASE_JS_TOOL],
             "node": [CONFIG.JS.NODE_TOOL],
         },
         deps = deps,
