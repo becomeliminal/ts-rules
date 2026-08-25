@@ -158,3 +158,99 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
         building_description = "Compiling...",
     )
 
+
+def _ts_entry(name:str, lib:str, main:str, test_only:bool):
+    """Generates the module that starts the program.
+
+    The entry imports the library by its package name rather than by a path into
+    the build output, so running a ts_binary exercises the resolution the
+    library will actually get from its consumers. A path would work here and
+    prove nothing.
+
+    Always ESM, whatever the library emits. Node reads .mjs as a module
+    regardless of any package.json, and an ESM entry can import a CommonJS
+    package, so one shape serves both -- and neither this rule nor its caller
+    has to know or restate the library's module type, which is the sort of
+    duplicated declaration that goes stale silently.
+
+    The package name is read out of lib.json with node rather than with sed: the
+    file is JSON, node is already a tool here, and a real parser cannot be
+    fooled by a package name containing a character that a pattern did not
+    anticipate.
+    """
+    out = f"_{name}_entry.mjs"
+    return build_rule(
+        name = tag(name, "entry"),
+        srcs = {"lib": [lib]},
+        outs = [out],
+        cmd = " && ".join([
+            'NODE=$(readlink -f "$TOOLS_NODE")',
+            'LIB=$(readlink -f "$(find "$SRCS_LIB" -name lib.json | head -1)")',
+            '"$NODE" -e \'const p=require(process.argv[1]).package;' +
+            'const s=process.argv[2];' +
+            'process.stdout.write("import "+JSON.stringify(s?p+"/"+s:p)+";\\n")\' ' +
+            f'"$LIB" "{main}" > "$OUT"',
+        ]),
+        tools = {"node": [CONFIG.JS.NODE_TOOL]},
+        test_only = test_only,
+        building_description = "Generating entry...",
+    )
+
+
+def ts_binary(name:str, lib:str, main:str="", deps:list=[], node_modules:str="",
+              node_options:list=[], visibility:list=None, labels:list=[]):
+    """A program whose entry point is a compiled TypeScript library.
+
+    Args:
+        name: Target name.
+        lib: The ts_library to run.
+        main: Subpath within the package to start, e.g. "cli.js". Defaults to
+              the package's own entry point.
+        deps: Further libraries the program imports.
+        node_modules: The third-party tree, from npm_link.
+        node_options: Flags passed to node.
+        visibility: Visibility specification.
+        labels: Additional labels.
+    """
+    return js_binary(
+        name = name,
+        entry_point = _ts_entry(name, lib, main, False),
+        deps = [lib] + deps,
+        node_modules = node_modules,
+        node_options = node_options,
+        visibility = visibility,
+        labels = labels,
+    )
+
+
+def ts_test(name:str, lib:str, main:str="", deps:list=[], node_modules:str="",
+            node_options:list=[], visibility:list=None, labels:list=[],
+            timeout:int=0, flaky:bool|int=0, size:str=None):
+    """A compiled TypeScript library run under `plz test`.
+
+    Args:
+        name: Target name.
+        lib: The ts_library to run.
+        main: Subpath within the package to start. Defaults to the package's
+              own entry point.
+        deps: Further libraries the test imports.
+        node_modules: The third-party tree, from npm_link.
+        node_options: Flags passed to node.
+        visibility: Visibility specification.
+        labels: Additional labels.
+        timeout: Test timeout in seconds.
+        flaky: True to mark the test flaky, or an integer for reruns.
+        size: Test size.
+    """
+    return js_test(
+        name = name,
+        entry_point = _ts_entry(name, lib, main, True),
+        deps = [lib] + deps,
+        node_modules = node_modules,
+        node_options = node_options,
+        visibility = visibility,
+        labels = labels,
+        timeout = timeout,
+        flaky = flaky,
+        size = size,
+    )
