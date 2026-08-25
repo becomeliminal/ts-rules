@@ -159,6 +159,88 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     )
 
 
+def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
+             tsconfig_deps:list=[], compiler:str="", node_modules:str="",
+             args:list=[], visibility:list=None, test_only:bool&testonly=False,
+             labels:list=[]):
+    """Type-checks sources without emitting anything.
+
+    ts_library is the wrong shape for an application. An application is not
+    imported by name, has no package to be, and its JavaScript is produced by a
+    bundler rather than by the compiler -- so a rule that emits a package would
+    be emitting something nobody consumes.
+
+    But the checking still has to happen somewhere, and a bundler will not do
+    it: esbuild, which is what vite transpiles with, strips types without
+    reading them, so a type error in an application reaches production without
+    ever failing a build. This is the target that fails it.
+
+    Separate from the bundle on purpose, and not only because the shapes differ.
+    They are different failures with different inputs: a type error is not a
+    reason to invalidate a bundle's cache, and a changed asset is not a reason
+    to type-check again. `tsc && vite build` is the same split, drawn by hand.
+
+    Args:
+        name: Target name.
+        srcs: Sources to check.
+        deps: ts_library and js_library targets the sources import, and npm_repo
+              targets. A first-party dependency is checked against its generated
+              declarations, which is the whole reason ts_library emits them.
+        tsconfig: The tsconfig for this package.
+        tsconfig_deps: Every config in the extends chain.
+        compiler: node_modules tree holding the compiler. Defaults to the
+                  Compiler config.
+        node_modules: The tree the sources resolve their imports through.
+        args: Additional compiler flags. --noEmit is set here and cannot be
+              overridden, since it is the entire point.
+        visibility: Visibility specification.
+        test_only: If True, only visible to test rules.
+        labels: Additional labels.
+    """
+    compiler = compiler or CONFIG.TS.COMPILER
+    node_modules = node_modules or CONFIG.JS.NODE_MODULES
+
+    return build_rule(
+        name = name,
+        srcs = {
+            "srcs": srcs,
+            "config": [tsconfig],
+            "extends": tsconfig_deps,
+            "modules": [node_modules] if node_modules else [],
+            "compiler": [compiler],
+        },
+        # A stamp, because a rule with no output cannot be depended on and would
+        # not run. It records what was checked rather than being empty, so a
+        # failure to stage a source shows up as a missing name here.
+        outs = [name + ".checked"],
+        cmd = " && ".join([
+            'TOOL=$(readlink -f "$TOOLS_TOOL")',
+            'NODE=$(readlink -f "$TOOLS_NODE")',
+            'mkdir -p _compiler',
+            'cp -R "$SRCS_COMPILER/." _compiler/',
+            'LIBS=$(find . -name node_modules -prune -o -name lib.json -print | ' +
+            'while read m; do printf -- "--lib %s:%s " "$m" "$(dirname "$m")/pkg"; done)',
+            '"$TOOL" overlay --tree "${SRCS_MODULES:-}" --out node_modules $LIBS',
+            f'BIN=$(readlink -f "$("$TOOL" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
+            " ".join([
+                '"$NODE" "$BIN" -p "$SRCS_CONFIG" --noEmit',
+                "--tsBuildInfoFile _tsbuildinfo",
+            ] + args),
+            'for s in $SRCS_SRCS; do echo "$s"; done > "$OUT"',
+        ]),
+        tools = {
+            "tool": [CONFIG.JS.PLEASE_JS_TOOL],
+            "node": [CONFIG.JS.NODE_TOOL],
+        },
+        deps = deps,
+        needs_transitive_deps = True,
+        visibility = visibility,
+        test_only = test_only,
+        labels = labels + ["ts_check"],
+        building_description = "Type-checking...",
+    )
+
+
 def _ts_entry(name:str, lib:str, main:str, test_only:bool):
     """Generates the module that starts the program.
 
