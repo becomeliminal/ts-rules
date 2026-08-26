@@ -13,7 +13,7 @@ plugin_repo(
     plugin = "js-rules",
     # Pinned past the platform-filtering change: TypeScript 7 ships twenty
     # native compilers and this plugin fetches exactly one.
-    revision = "a27e647",
+    revision = "ccd58ff",
 )
 
 plugin_repo(

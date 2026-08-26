@@ -35,7 +35,22 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
 
     Args:
         name: Target name.
-        srcs: .ts, .tsx and .d.ts sources compiled by the TypeScript compiler.
+        srcs: Sources for the compiler -- .ts, .tsx and .d.ts, and .js and .jsx
+              where the tsconfig sets allowJs.
+
+            A repo does not have to be TypeScript to use this. With allowJs the
+            compiler takes JavaScript too, emits declarations for it from its
+            JSDoc, and with checkJs type-checks it -- so a repo with five
+            hundred .js files and three .ts files points one rule at all of it,
+            and one with no TypeScript at all still gets declarations and
+            checking.
+
+            There is deliberately no allow_js argument, though rules_ts has one.
+            Theirs exists because Bazel has to predict which files are emitted
+            before running the compiler, and allowJs changes that set. This rule
+            emits a directory, so there is nothing to predict and nothing to
+            keep in step with the tsconfig -- one fewer place for the two to
+            disagree.
         deps: Other ts_library or js_library targets, and npm_repo targets.
         assets: Files copied into the package verbatim and never shown to the
                 compiler. tsc does not copy a .css a component imports, but the
