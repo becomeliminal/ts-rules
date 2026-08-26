@@ -187,6 +187,13 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             # diagnostics come out as pkg/file.ts(3,14) -- the repo path, which
             # an editor can open -- rather than a bare filename.
             f'BIN=$(readlink -f "$("$PLEASE_JS" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
+            # The config is validated against the flags mirrored over it before
+            # anything compiles. --rootDir below wins over whatever the config
+            # says, so a rootDir in the chain that disagrees would be silently
+            # ignored -- and the wrong emitted path is import paths inside
+            # node_modules, which is much worse than the error this raises.
+            '"$NODE" "$BIN" -p "$SRCS_CONFIG" --showConfig > _showconfig.json',
+            f'"$PLEASE_JS" tsconfig-check --show-config _showconfig.json --config "$SRCS_CONFIG" --root "{root}"',
             " ".join([
                 '"$NODE" "$BIN" -p "$SRCS_CONFIG"',
                 f"--rootDir {root} --outDir {out_dir}",
