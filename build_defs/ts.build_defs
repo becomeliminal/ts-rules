@@ -127,6 +127,12 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     strip = (root + "/") if root else ""
 
     # A scratch directory at the staging root, so no `include` glob rooted at
+    # A dep narrowed to one named output (":lib|types") cannot travel as a
+    # dep -- deps stage every output regardless -- so it rides the srcs channel
+    # instead, which is where the narrowing is honoured.
+    narrowed = [d for d in deps if "|" in d]
+    deps = [d for d in deps if "|" not in d]
+
     # the package can reach the compiler's own output.
     out_dir = "_ts_out"
 
@@ -137,12 +143,21 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
         srcs = {
             "srcs": srcs,
             "assets": assets,
+            "libs": narrowed,
             "config": [tsconfig],
             "extends": tsconfig_deps,
             "modules": [node_modules] if node_modules else [],
             "compiler": [compiler],
         },
-        outs = [name],
+        # The same two named outputs js_library emits, for the same measured
+        # reason: Please invalidates per output, so a bundle narrowed to
+        # :lib|pkg stops rebuilding when a declaration changes and a ts_check
+        # narrowed to :lib|types stops re-running when runtime code does. A
+        # plain dep stages both and behaves as before.
+        outs = {
+            "pkg": [name],
+            "types": [name + "_types"],
+        },
         cmd = " && ".join([
             'PLEASE_JS=$(readlink -f "$TOOLS_PLEASE_JS")',
             'NODE=$(readlink -f "$TOOLS_NODE")',
@@ -175,17 +190,24 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
               + args),
 
             # Assemble the shape js_library produces, so a js_binary consumes it
-            # without knowing TypeScript was involved.
-            'mkdir -p "$OUT/pkg"',
-            f'cp -R {out_dir}/. "$OUT/pkg/"',
+            # without knowing TypeScript was involved. tsc emits .js and .d.ts
+            # into one directory; they part company here, declarations into a
+            # package-shaped twin, for the same measured reason js_library
+            # splits: Please invalidates per output.
+            'mkdir -p "$OUTS_PKG/pkg" "$OUTS_TYPES/pkg"',
+            f'cp -R {out_dir}/. "$OUTS_PKG/pkg/"',
+            'TYPES_ABS="$TMP_DIR/$OUTS_TYPES"',
+            'cd "$OUTS_PKG/pkg" && find . -name "*.d.ts" -o -name "*.d.ts.map" | while read f; do ' +
+            'mkdir -p "$TYPES_ABS/pkg/$(dirname "$f")" && mv "$f" "$TYPES_ABS/pkg/$f"; done',
+            'cd "$TMP_DIR"',
         ] + ([
-            'cp -R _trace "$OUT/trace"',
+            'cp -R _trace "$OUTS_PKG/trace"',
         ] if generate_trace else []) + [
-            f'for a in ${SRCS_ASSETS:-}; do mkdir -p "$OUT/pkg/$(dirname "${{a#{strip}}}")" && cp "$a" "$OUT/pkg/${{a#{strip}}}"; done',
+            f'for a in ${SRCS_ASSETS:-}; do mkdir -p "$OUTS_PKG/pkg/$(dirname "${{a#{strip}}}")" && cp "$a" "$OUTS_PKG/pkg/${{a#{strip}}}"; done',
             " ".join([
                 '"$PLEASE_JS" describe',
                 f"--name {name} --package {package} --version 0.0.0",
-                f"--main {main} --types {types}",
+                f"--main {main}",
                 # Where the sources live, for a development server that serves
                 # them instead of this compiled output -- it transforms the
                 # TypeScript itself, which is why the entry is recorded as
@@ -194,7 +216,16 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
                 f"--src-dir {pkg_dir} --src-entry {entry}",
                 " ".join([f"--src {f}" for f in dev_srcs]),
                 set_flags,
-                '--dir "$OUT/pkg" --out "$OUT/lib.json"',
+                '--dir "$OUTS_PKG/pkg" --out "$OUTS_PKG/lib.json"',
+            ]),
+            # The twin: a compiler resolves the package by this manifest and
+            # reads the declarations beside it; node never loads it.
+            " ".join([
+                '"$PLEASE_JS" describe',
+                f"--name {name}_types --package {package} --version 0.0.0",
+                f"--main {main} --types {types} --role types",
+                set_flags,
+                '--dir "$OUTS_TYPES/pkg" --out "$OUTS_TYPES/lib.json"',
             ]),
         ]),
         tools = {
@@ -206,7 +237,10 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
         needs_transitive_deps = True,
         visibility = visibility,
         test_only = test_only,
-        labels = labels + [f"js_library:{package}", f"ts_library:{package}"],
+        # Bare labels for discovery -- plz query --include matches exactly --
+        # beside the packaged ones that carry the data. js_library's label,
+        # because to every consumer, including js_project, that is what this is.
+        labels = labels + ["js_library", f"js_library:{package}", f"ts_library:{package}"],
         building_description = "Compiling...",
     )
 
@@ -252,10 +286,17 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
     compiler = compiler or CONFIG.TS.COMPILER
     node_modules = node_modules or CONFIG.JS.NODE_MODULES
 
+    # A dep narrowed to one named output (":lib|types") cannot travel as a
+    # dep -- deps stage every output regardless -- so it rides the srcs channel
+    # instead, which is where the narrowing is honoured.
+    narrowed = [d for d in deps if "|" in d]
+    deps = [d for d in deps if "|" not in d]
+
     return build_rule(
         name = name,
         srcs = {
             "srcs": srcs,
+            "libs": narrowed,
             "config": [tsconfig],
             "extends": tsconfig_deps,
             "modules": [node_modules] if node_modules else [],
@@ -319,7 +360,7 @@ def _ts_entry(name:str, lib:str, main:str, test_only:bool):
         outs = [out],
         cmd = " && ".join([
             'NODE=$(readlink -f "$TOOLS_NODE")',
-            'LIB=$(readlink -f "$(find "$SRCS_LIB" -name lib.json | head -1)")',
+            'LIB=$(readlink -f "$(find $SRCS_LIB -name lib.json | head -1)")',
             '"$NODE" -e \'const p=require(process.argv[1]).package;' +
             'const s=process.argv[2];' +
             'process.stdout.write("import "+JSON.stringify(s?p+"/"+s:p)+";\\n")\' ' +

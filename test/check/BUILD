@@ -7,6 +7,9 @@ subinclude("//build_defs:ts")
 ts_check(
     name = "check",
     srcs = ["app.ts"],
-    deps = ["//test/greeter"],
+    # Narrowed to the declarations on purpose: checking reads .d.ts, never the
+    # runtime .js, so an edit to greeter's implementation should leave this
+    # target cached. The matching test below proves the narrowing resolves.
+    deps = ["//test/greeter|types"],
     tsconfig_deps = ["//:tsconfig.json"],
 )
