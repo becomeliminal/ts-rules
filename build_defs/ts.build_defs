@@ -70,7 +70,9 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
               package would shift every emitted path -- and therefore every
               import path in node_modules. It would work for months and then
               break when someone added a file.
-        tsconfig: The project's tsconfig.
+        tsconfig: The project's tsconfig -- a file, or a ts_config target,
+                  which carries its own extends chain and makes tsconfig_deps
+                  unnecessary.
         tsconfig_deps: The configs it extends, directly or transitively.
 
                        Listed rather than discovered: `extends` is resolved by
@@ -132,6 +134,12 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     # instead, which is where the narrowing is honoured.
     narrowed = [d for d in deps if "|" in d]
     deps = [d for d in deps if "|" not in d]
+
+    # A ts_config target carries its extends chain in its deps, and transitive
+    # staging follows the deps channel, not a source's own deps -- so a label
+    # tsconfig rides both: srcs names the file for -p, deps drags the chain.
+    if tsconfig.startswith(":") or tsconfig.startswith("//"):
+        deps += [tsconfig]
 
     # the package can reach the compiler's own output.
     out_dir = "_ts_out"
@@ -245,6 +253,43 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     )
 
 
+def ts_config(name:str, src:str="tsconfig.json", deps:list=[],
+              visibility:list=None, test_only:bool&testonly=False):
+    """A tsconfig as a target, carrying the chain it extends.
+
+    This rule existed once and was deleted: as a filegroup collecting several
+    configs it flattened them to basenames in its own package, and two
+    tsconfig.json files collided. The deletion was right for that shape and
+    wrong as a conclusion. One target per config, each keeping its file in its
+    own package, collides with nothing -- and the chain rides deps, so a
+    consumer stages every config at its real path, which is the only thing
+    `extends` (resolved relative to the file naming it) ever needed.
+
+    What this buys over tsconfig_deps: the base config is a target rather than
+    a path every package repeats. A package's tsconfig names its ts_config
+    target's deps once; consumers say tsconfig = ":tsconfig" and carry no
+    knowledge of the chain, so adding a link to it changes one BUILD file
+    rather than every rule that ever listed the chain by hand.
+
+    Args:
+        name: Target name.
+        src: The config file itself.
+        deps: ts_config targets for every config this one extends. Direct
+              extends only -- each target names its own, and transitivity does
+              the rest.
+        visibility: Visibility specification.
+        test_only: If True, only visible to test rules.
+    """
+    return filegroup(
+        name = name,
+        srcs = [src],
+        deps = deps,
+        visibility = visibility,
+        test_only = test_only,
+        labels = ["ts_config"],
+    )
+
+
 def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
              tsconfig_deps:list=[], compiler:str="", node_modules:str="",
              args:list=[], visibility:list=None, test_only:bool&testonly=False,
@@ -291,6 +336,12 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
     # instead, which is where the narrowing is honoured.
     narrowed = [d for d in deps if "|" in d]
     deps = [d for d in deps if "|" not in d]
+
+    # A ts_config target carries its extends chain in its deps, and transitive
+    # staging follows the deps channel, not a source's own deps -- so a label
+    # tsconfig rides both: srcs names the file for -p, deps drags the chain.
+    if tsconfig.startswith(":") or tsconfig.startswith("//"):
+        deps += [tsconfig]
 
     return build_rule(
         name = name,
