@@ -105,6 +105,10 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     compiler = compiler or CONFIG.TS.COMPILER
     node_modules = node_modules or CONFIG.JS.NODE_MODULES
 
+    pkg_dir = package_name()
+    strip_len = len(pkg_dir) + 1 if pkg_dir else 0
+    dev_srcs = [f[strip_len:] if f.startswith(pkg_dir + "/") else f for f in srcs + assets]
+
     main = entry.replace(".tsx", ".js").replace(".ts", ".js")
     types = entry.replace(".tsx", ".d.ts").replace(".ts", ".d.ts")
     strip = (root + "/") if root else ""
@@ -163,6 +167,13 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
                 '"$PLEASE_JS" describe',
                 f"--name {name} --package {package} --version 0.0.0",
                 f"--main {main} --types {types}",
+                # Where the sources live, for a development server that serves
+                # them instead of this compiled output -- it transforms the
+                # TypeScript itself, which is why the entry is recorded as
+                # written rather than as emitted. Assets are included because a
+                # stylesheet a component imports must be servable too.
+                f"--src-dir {pkg_dir} --src-entry {entry}",
+                " ".join([f"--src {f}" for f in dev_srcs]),
                 set_flags,
                 '--dir "$OUT/pkg" --out "$OUT/lib.json"',
             ]),
