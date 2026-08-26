@@ -1,0 +1,31 @@
+# TypeScript 5.x, alongside the tsgo this plugin compiles with.
+#
+# Not redundant. TypeScript 7 has no stable programmatic API until 7.1, so
+# typescript-eslint, ts-jest, ts-morph and the Vue, Svelte and Astro checkers
+# all still need a 5.x -- and one node_modules cannot hold two packages both
+# called typescript. Keeping the compiler in its own tree is what makes pointing
+# the Compiler config key at this one a config change rather than a fork.
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+packages:
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+snapshots:
+
+  typescript@5.9.3: {}

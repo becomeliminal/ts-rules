@@ -1,0 +1,5 @@
+{
+  "name": "tsc5-pin",
+  "private": true,
+  "dependencies": { "typescript": "5.9.3" }
+}
