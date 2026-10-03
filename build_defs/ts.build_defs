@@ -29,6 +29,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
                entry:str="index.ts", root:str="", tsconfig:str="tsconfig.json",
                tsconfig_deps:list=[],
                module_type:str="", compiler:str="", node_modules:str="",
+               type_roots:list=[],
                source_map:bool=False, declaration_map:bool=False,
                generate_trace:bool=False,
                args:list=[], visibility:list=None,
@@ -105,6 +106,13 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             //test/tsc5 compiles and checks against a 5.9 to prove it.
         node_modules: The tree the sources resolve their imports through.
                       Defaults to js-rules' NodeModules config.
+        type_roots: node_modules trees whose @types packages the compiler
+                    loads, as --typeRoots and --types, beside the sources'
+                    own tree rather than merged into it. What a ts_test suite
+                    compiles against, so node:test resolves without the
+                    consumer installing @types/node. Given on the command
+                    line, these replace any types or typeRoots the tsconfig
+                    sets.
         args: Additional compiler flags. The flags this rule's output contract
               depends on -- outDir, rootDir, declaration, noEmit and
               tsBuildInfoFile -- are set here and cannot be overridden.
@@ -156,6 +164,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             "extends": tsconfig_deps,
             "modules": [node_modules] if node_modules else [],
             "compiler": [compiler],
+            "typeroots": type_roots,
         },
         # The same two named outputs js_library emits, for the same measured
         # reason: Please invalidates per output, so a bundle narrowed to
@@ -193,13 +202,21 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             # ignored -- and the wrong emitted path is import paths inside
             # node_modules, which is much worse than the error this raises.
             '"$NODE" "$BIN" -p "$SRCS_CONFIG" --showConfig > _showconfig.json',
+        ] + ([
+            # Every package under each tree's @types, named for --types, which
+            # otherwise defaults to nothing in a tsconfig that sets types: [].
+            'TYPE_ROOTS="" && TYPE_NAMES=""',
+            'for t in $SRCS_TYPEROOTS; do TYPE_ROOTS="$TYPE_ROOTS${TYPE_ROOTS:+,}$t/@types"; ' +
+            'for n in $(ls "$t/@types"); do TYPE_NAMES="$TYPE_NAMES${TYPE_NAMES:+,}$n"; done; done',
+        ] if type_roots else []) + [
             f'"$PLEASE_JS" tsconfig-check --show-config _showconfig.json --config "$SRCS_CONFIG" --root "{root}"',
             " ".join([
                 '"$NODE" "$BIN" -p "$SRCS_CONFIG"',
                 f"--rootDir {root} --outDir {out_dir}",
                 "--declaration --noEmit false --emitDeclarationOnly false",
                 "--tsBuildInfoFile _tsbuildinfo",
-            ] + (["--sourceMap"] if source_map else [])
+            ] + (['--typeRoots "$TYPE_ROOTS" --types "$TYPE_NAMES"'] if type_roots else [])
+              + (["--sourceMap"] if source_map else [])
               + (["--declarationMap"] if declaration_map else [])
               + (["--generateTrace _trace"] if generate_trace else [])
               + args),
@@ -456,17 +473,44 @@ def ts_binary(name:str, lib:str, main:str="", deps:list=[], node_modules:str="",
     )
 
 
-def ts_test(name:str, lib:str, main:str="", deps:list=[], node_modules:str="",
-            node_options:list=[], visibility:list=None, labels:list=[],
-            timeout:int=0, flaky:bool|int=0, size:str=None):
-    """A compiled TypeScript library run under `plz test`.
+def ts_test(name:str, lib:str="", main:str="", srcs:list=[], deps:list=[],
+            data:list=[], env:dict={}, tsconfig:str="tsconfig.json",
+            tsconfig_deps:list=[], root:str="", compiler:str="",
+            node_modules:str="", node_options:list=[], visibility:list=None,
+            labels:list=[], timeout:int=0, flaky:bool|int=0, size:str=None):
+    """TypeScript tests, under `plz test`.
+
+    Two modes, as js_test has, because a test is one of two things.
+
+    Pass `srcs` and they are a suite: .test.ts files written against node's
+    own test runner (node:test, node:assert), compiled and type-checked like a
+    ts_library and run by js_test, which reports each test by name. Nothing
+    is installed for this. The runner is part of the node runtime, and its
+    types come from the NodeTypes config, as the compiler comes from Compiler.
+
+    Pass `lib` and a compiled library runs as a program, passing if it exits
+    cleanly: a smoke test of an entry point.
 
     Args:
         name: Target name.
-        lib: The ts_library to run.
-        main: Subpath within the package to start. Defaults to the package's
-              own entry point.
-        deps: Further libraries the test imports.
+        lib: The ts_library to run as a program. Exactly one of this and srcs.
+        main: With lib, the subpath within the package to start. Defaults to
+              the package's own entry point.
+        srcs: The suite's sources: its .test.ts files, and any helpers they
+              import by relative path. Every *.test file among them is run;
+              the rest are only compiled.
+        deps: Libraries the tests import by package name -- the ones under
+              test -- and, with lib, further libraries the program imports.
+        data: Files the tests read rather than import. They stage at their
+              package paths, and the working directory is the staging root,
+              so a test reads `pkg/fixture.json` by that name.
+        env: Environment for the tests.
+        tsconfig: The suite's tsconfig, as ts_library takes it.
+        tsconfig_deps: The configs it extends.
+        root: The prefix stripped from the suite's sources, as ts_library
+              takes it.
+        compiler: node_modules tree holding the compiler. Defaults to the
+                  Compiler config.
         node_modules: The third-party tree, from npm_link.
         node_options: Flags passed to node.
         visibility: Visibility specification.
@@ -475,10 +519,46 @@ def ts_test(name:str, lib:str, main:str="", deps:list=[], node_modules:str="",
         flaky: True to mark the test flaky, or an integer for reruns.
         size: Test size.
     """
+    if bool(lib) == bool(srcs):
+        fail(f"ts_test {name}: set exactly one of lib or srcs")
+    if not srcs:
+        return js_test(
+            name = name,
+            entry_point = _ts_entry(name, lib, main, True),
+            deps = [lib] + deps,
+            data = data,
+            env = env,
+            node_modules = node_modules,
+            node_options = node_options,
+            visibility = visibility,
+            labels = labels,
+            timeout = timeout,
+            flaky = flaky,
+            size = size,
+        )
+
+    # Compiled exactly as a library is, so a type error in a test fails the
+    # build, and handed to js_test as a target: its *.test files are the suite.
+    # Named as a package no one imports, one segment so node accepts it.
+    suite = ts_library(
+        name = f"_{name}_suite",
+        srcs = srcs,
+        deps = deps,
+        package = package_name().replace("/", "-") + "-" + name,
+        root = root,
+        tsconfig = tsconfig,
+        tsconfig_deps = tsconfig_deps,
+        compiler = compiler,
+        node_modules = node_modules,
+        type_roots = [CONFIG.TS.NODE_TYPES] if CONFIG.TS.NODE_TYPES else [],
+        test_only = True,
+    )
     return js_test(
         name = name,
-        entry_point = _ts_entry(name, lib, main, True),
-        deps = [lib] + deps,
+        srcs = [suite + "|pkg"],
+        deps = deps,
+        data = data,
+        env = env,
         node_modules = node_modules,
         node_options = node_options,
         visibility = visibility,
