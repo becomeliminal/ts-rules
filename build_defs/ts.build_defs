@@ -205,7 +205,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
         ] + ([
             # Every package under each tree's @types, named for --types, which
             # otherwise defaults to nothing in a tsconfig that sets types: [].
-            'TYPE_ROOTS=""; TYPE_NAMES=""',
+            'TYPE_ROOTS="" && TYPE_NAMES=""',
             'for t in $SRCS_TYPEROOTS; do TYPE_ROOTS="$TYPE_ROOTS${TYPE_ROOTS:+,}$t/@types"; ' +
             'for n in $(ls "$t/@types"); do TYPE_NAMES="$TYPE_NAMES${TYPE_NAMES:+,}$n"; done; done',
         ] if type_roots else []) + [
