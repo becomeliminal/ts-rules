@@ -16,3 +16,12 @@ js_test(
     srcs = ["check_rooted.test.js"],
     deps = [":rooted"],
 )
+
+# What a development server links in place of the compiled package: the
+# sources laid out as the package is, relative to root -- src/index.ts at
+# index.ts -- so a subpath import resolves in development as in a build.
+js_test(
+    name = "rooted_dev_test",
+    srcs = ["check_rooted_dev.test.js"],
+    data = [":rooted"],
+)
