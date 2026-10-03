@@ -38,6 +38,15 @@ target per config, each file staying in its own package, the chain riding
 deps. Consumers write `tsconfig = ":tsconfig"` and carry no knowledge of the
 chain.
 
+`ts_test` with `srcs` is a suite: `.test.ts` files written against node's own
+test runner (`node:test`, `node:assert`), compiled and type-checked like a
+library and run by js-rules' `js_test`, which reports each test by name. The
+tests import the library under test by package name, through `deps`.
+Nothing is installed: the runner is part of the node runtime, and its types
+come from the `NodeTypes` config, as the compiler comes from `Compiler`. With
+`lib` instead, a compiled library runs as a program and passes if it exits
+cleanly.
+
 ## Guard rails
 
 Two flags the rule mirrors over the config -- `rootDir` and `outDir` -- are

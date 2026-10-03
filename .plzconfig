@@ -10,6 +10,13 @@ DefaultValue = ///ts//third_party/js:compiler
 Help = node_modules tree holding the TypeScript compiler. Kept separate from the consumer's tree so the plugin pins its own version, and so a second TypeScript can coexist: TS 7 has no stable programmatic API until 7.1, which typescript-eslint and Astro's checker need.
 Inherit = true
 
+[PluginConfig "node_types"]
+ConfigKey = NodeTypes
+DefaultValue = ///ts//third_party/js:node_types
+Help = node_modules tree whose @types the compiler loads for a ts_test suite. Its tests run under node's own test runner, so they import node:test and node:assert, and their types come with the runner rather than from the consumer's tree -- the same reason the plugin ships its compiler. Point it at a tree pinning the @types/node that matches your node.
+Optional = true
+Inherit = true
+
 [PluginConfig "compiler_package"]
 ConfigKey = CompilerPackage
 DefaultValue = typescript

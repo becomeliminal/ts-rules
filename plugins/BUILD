@@ -14,7 +14,7 @@ plugin_repo(
     # Pinned past the platform-filtering change (TypeScript 7 ships twenty
     # native compilers and this plugin fetches exactly one) and the link-tree,
     # peer-merging and npm_workspace work consumers now build on.
-    revision = "c00c91c8055e3a1d7d94567e37ad8e79b6467731",
+    revision = "44772f70f241addcb10c5b2f2ac85ef884e11ef0",
 )
 
 plugin_repo(

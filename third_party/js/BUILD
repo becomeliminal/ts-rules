@@ -215,6 +215,7 @@ npm_link(
     ],
     visibility = ["PUBLIC"],
 )
+
 npm_repo(
     name = "types_node_22.18.13",
     hashes = ["5401b90ad750c7420467cb4d66fa7118fef1c5074c35b2e1546e0537f863bf06"],
@@ -231,6 +232,19 @@ npm_repo(
 
 npm_link(
     name = "consumer",
+    lock = "consumer-lock.yaml",
+    packages = [
+        ":types_node_22.18.13",
+        ":undici-types_6.21.0",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The types for node's own test runner, which ts_test suites compile against:
+# the NodeTypes config's default. The same pins as the consumer fixture tree,
+# linked under a name that says what it is for.
+npm_link(
+    name = "node_types",
     lock = "consumer-lock.yaml",
     packages = [
         ":types_node_22.18.13",
