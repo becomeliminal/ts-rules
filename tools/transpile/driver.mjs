@@ -178,15 +178,22 @@ function formatOf(file, kind, options, moduleType) {
   if (ESM_MODULES.includes(options.module)) return "esm";
   if (PACKAGE_MODULES.includes(options.module)) {
     const declared = moduleType === "module" ? "module" : "commonjs";
-    // The compiler decided this file's format from the package.json it could
-    // see. The rule decided it from module_type. If they differ the
-    // JavaScript written here is not the module the compiler checked.
-    const seen = packageType(file);
-    if (seen !== undefined && seen !== declared) {
+    // Under a node module setting the compiler takes a file's format from the
+    // package.json above it, and from nothing else: with none staged, the file
+    // is CommonJS to it. The rule takes the package's from module_type. Where
+    // they differ, the JavaScript written here would not be the module the
+    // compiler checked -- it accepts an extensionless relative import in
+    // CommonJS, say, that node then refuses in an ES module.
+    const seen = packageType(file) ?? "commonjs";
+    if (seen !== declared) {
       refuse(
-        `${file}: the package.json above it has "type": "${seen}", and the rule's module_type makes ` +
-          `the package "${declared}". Under module ${options.module} the compiler follows the ` +
-          "former, so the two must agree.",
+        `${file}: under module ${options.module} the compiler checks it as "${seen}" -- ` +
+          (packageType(file) === undefined
+            ? "no package.json is staged above it, and that is what the compiler assumes then"
+            : `the package.json above it says "type": "${seen}"`) +
+          ` -- and the rule's module_type makes the package "${declared}". They must agree: stage a ` +
+          'package.json whose "type" matches, or set module to an ES module setting (esnext, with ' +
+          "bundler resolution) if nothing but a bundler resolves these sources.",
       );
     }
     return declared === "module" ? "esm" : "cjs";

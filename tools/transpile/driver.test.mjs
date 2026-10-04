@@ -62,7 +62,6 @@ test("the module setting decides the format", () => {
     ["esnext", "", "esm"],
     ["preserve", "", "esm"],
     ["nodenext", "", "cjs"],
-    ["nodenext", "module", "esm"],
     ["node16", "commonjs", "cjs"],
   ]) {
     const dir = library({ "src/a.ts": "export {};\n" }, { ...BASE, module });
@@ -151,14 +150,28 @@ test("refuses a source outside the root", () => {
   refused(drive(dir, ["src/a.ts", "elsewhere/b.ts"]), /elsewhere\/b\.ts is outside the root/);
 });
 
-test("refuses a package.json that disagrees with the rule about the package's type", () => {
-  const files = { "src/a.ts": "export {};\n", "package.json": '{"type": "module"}\n' };
-  const dir = library(files, { ...BASE, module: "nodenext" }, { declare: ["src/a.ts"] });
-  refused(drive(dir, ["src/a.ts"]), /"type": "module"/, /module_type/);
-  // Agreeing, it is an ES module.
-  const run = drive(dir, ["src/a.ts"], ["--module-type", "module"]);
-  assert.equal(run.status, 0, run.stderr);
-  assert.match(run.read("a.js"), /^\/\/ esm /);
+test("under a node module setting, the package's type must be what the compiler sees", () => {
+  const options = { ...BASE, module: "nodenext" };
+  const source = { "src/a.ts": "export {};\n" };
+  const esm = { ...source, "package.json": '{"type": "module"}\n' };
+  const declared = { declare: ["src/a.ts"] };
+
+  // An ES module package: the compiler sees the package.json, the rule says
+  // module_type, and they agree.
+  const agreed = drive(library(esm, options, declared), ["src/a.ts"], ["--module-type", "module"]);
+  assert.equal(agreed.status, 0, agreed.stderr);
+  assert.match(agreed.read("a.js"), /^\/\/ esm /);
+
+  // The package.json says module and the rule does not.
+  refused(drive(library(esm, options, declared), ["src/a.ts"]), /checks it as "module"/, /module_type/);
+
+  // The rule says module and no package.json is staged, so the compiler
+  // checked CommonJS: it would have passed an import node's ES modules refuse.
+  refused(
+    drive(library(source, options), ["src/a.ts"], ["--module-type", "module"]),
+    /checks it as "commonjs"/,
+    /no package\.json is staged/,
+  );
 });
 
 test("refuses a module that is not an adapter", () => {
