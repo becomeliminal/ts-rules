@@ -10,7 +10,8 @@ import path from "node:path";
 import { test } from "node:test";
 
 const HERE = path.resolve("tools/transpile");
-const DRIVER = path.join(HERE, "driver.mjs");
+// As built: the driver in its directory, beside the tree its lexer is in.
+const DRIVER = path.join(HERE, "driver/driver.mjs");
 const ECHO = path.join(HERE, "testdata/echo.mjs");
 
 const BASE = { target: "es2022", module: "esnext", isolatedModules: true };
@@ -34,7 +35,7 @@ function library(files, compilerOptions, { declare = Object.keys(files) } = {}) 
 
 function drive(dir, files, extra = [], adapter = ECHO) {
   const adapterArgs = adapter ? ["--adapter", adapter] : [];
-  const driver = adapter ? DRIVER : path.join(extra.shift(), "driver.mjs");
+  const driver = adapter ? DRIVER : path.join(extra.shift(), "driver/driver.mjs");
   const run = spawnSync(
     process.execPath,
     [driver, "--config", "resolved.json", "--root", "src", "--out", "out", ...adapterArgs, ...extra, "--", ...files],
@@ -116,6 +117,94 @@ test("a source map names its file and the path back to the source", () => {
   // Not asked for by inlineSources, so not shipped.
   assert.equal(map.sourcesContent, undefined);
   assert.match(run.read("deep/a.js"), /\n\/\/# sourceMappingURL=a\.js\.map\n$/);
+});
+
+// What follows the adapter's first line: the module as the driver wrote it.
+const body = (text) => text.slice(text.indexOf("\n") + 1);
+
+test("an ES module's relative imports name the files they mean", () => {
+  const files = {
+    "src/main.ts": [
+      'import { a } from "./a";',
+      'import { view } from "./ui/view";',
+      'export * from "./parts";',
+      "export { deep } from '../src/parts/deep';",
+      'import "./effect";',
+      'const lazy = () => import("./a");',
+      "export { a, view, lazy };",
+      "",
+    ].join("\n"),
+    "src/a.ts": "export const a = 1;\n",
+    "src/effect.ts": "export {};\n",
+    "src/ui/view.tsx": 'import { a } from "../a";\nexport const view = a;\n',
+    "src/parts/index.ts": 'export { deep } from "./deep";\n',
+    "src/parts/deep.ts": "export const deep = 2;\n",
+  };
+  const run = drive(library(files, BASE), Object.keys(files));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(
+    body(run.read("main.js")),
+    [
+      'import { a } from "./a.js";',
+      'import { view } from "./ui/view.js";',
+      // A directory is its index.
+      'export * from "./parts/index.js";',
+      "export { deep } from './parts/deep.js';",
+      'import "./effect.js";',
+      'const lazy = () => import("./a.js");',
+      "export { a, view, lazy };",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(body(run.read("ui/view.js")), 'import { a } from "../a.js";\nexport const view = a;\n');
+  assert.equal(body(run.read("parts/index.js")), 'export { deep } from "./deep.js";\n');
+});
+
+test("only an import of a source being emitted is changed", () => {
+  const source = [
+    'import pkg from "some-package";',
+    'import sub from "@scope/pkg/sub";',
+    'import styles from "./styles.css";',
+    'import already from "./a.js";',
+    'import data from "./data.json";',
+    'import ghost from "./not-a-source";',
+    // Not imports: a string, a comment and a template that read like one.
+    'const text = "import x from \'./a\'"; // import y from "./a"',
+    'const tpl = `import z from "./a"`;',
+    "const computed = (name) => import(name);",
+    "export { pkg, sub, styles, already, data, ghost, text, tpl, computed };",
+    "",
+  ].join("\n");
+  const files = { "src/main.ts": source, "src/a.ts": "export default 1;\n" };
+  const run = drive(library(files, BASE), Object.keys(files));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(body(run.read("main.js")), source);
+});
+
+test("a file outranks a directory of the same name, as the compiler resolves it", () => {
+  const files = {
+    "src/main.ts": 'export * from "./thing";\n',
+    "src/thing.ts": "export const from = 'file';\n",
+    "src/thing/index.ts": "export const from = 'directory';\n",
+  };
+  const run = drive(library(files, BASE), Object.keys(files));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(body(run.read("main.js")), 'export * from "./thing.js";\n');
+});
+
+test("an import names the extension its target was emitted with", () => {
+  // Preserved JSX is emitted as .jsx, so that is the file to name.
+  const files = { "src/main.ts": 'export * from "./view";\n', "src/view.tsx": "export const v = 1;\n" };
+  const run = drive(library(files, { ...BASE, jsx: "preserve" }), Object.keys(files));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(body(run.read("main.js")), 'export * from "./view.jsx";\n');
+});
+
+test("CommonJS is left as written: require resolves an extension itself", () => {
+  const files = { "src/main.ts": 'import { a } from "./a";\nexport { a };\n', "src/a.ts": "export const a = 1;\n" };
+  const run = drive(library(files, { ...BASE, module: "commonjs" }), Object.keys(files));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(body(run.read("main.js")), 'import { a } from "./a";\nexport { a };\n');
 });
 
 test("refuses a tsconfig without isolatedModules", () => {

@@ -268,6 +268,13 @@ npm_update(
     dir = "third_party/js/esbuild",
 )
 
+# What the transpile driver itself imports: the lexer it finds import
+# specifiers with (lexer/).
+npm_update(
+    name = "update-lexer",
+    dir = "third_party/js/lexer",
+)
+
 # swc's tree as anything here uses it: the one //third_party/js/swc links, with
 # the native addon unpacked. unpack_swc.mjs says why the tree cannot be used
 # as npm delivers it.

@@ -1,0 +1,7 @@
+{
+  "name": "lexer-pin",
+  "private": true,
+  "dependencies": {
+    "es-module-lexer": "3.0.2"
+  }
+}

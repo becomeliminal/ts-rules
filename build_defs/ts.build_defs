@@ -276,7 +276,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             # to write JavaScript for a source the compiler emitted no
             # declaration for, since that source was never type-checked.
             " ".join([
-                '"$NODE" "$SRCS_TRANSPILER/driver.mjs"',
+                '"$NODE" "$SRCS_TRANSPILER/driver/driver.mjs"',
                 f"--config _showconfig.json --root '{root}' --out {out_dir}",
             ] + ([f"--module-type {module_type}"] if module_type else [])
               + (["--source-map"] if source_map else [])
@@ -421,13 +421,13 @@ def ts_transpiler(name:str, adapter:str, node_modules:str, visibility:list=None,
             "driver": [CONFIG.TS.TRANSPILE_DRIVER],
             "tree": [node_modules],
         },
-        # One directory: the driver, the adapter it loads, and the tree the
-        # adapter's imports resolve through, beside one another the way any
-        # node program and its node_modules are.
+        # One directory: the adapter beside the tree its imports resolve
+        # through, the way any node program and its node_modules are, and the
+        # driver that loads it in a directory of its own, with its own tree.
         outs = [name],
         cmd = " && ".join([
             'mkdir "$OUT"',
-            'cp "$SRCS_DRIVER" "$OUT/driver.mjs"',
+            'cp -R "$SRCS_DRIVER" "$OUT/driver"',
             'cp "$SRCS_ADAPTER" "$OUT/adapter.mjs"',
             'cp -R "$SRCS_TREE" "$OUT/node_modules"',
         ]),
@@ -614,8 +614,9 @@ def ts_binary(name:str, lib:str, main:str="", deps:list=[], node_modules:str="",
 
 def ts_test(name:str, lib:str="", main:str="", srcs:list=[], deps:list=[],
             data:list=[], env:dict={}, tsconfig:str="tsconfig.json",
-            tsconfig_deps:list=[], root:str="", compiler:str="",
-            transpiler:str="", node_modules:str="", node_options:list=[],
+            tsconfig_deps:list=[], root:str="", module_type:str="",
+            compiler:str="", transpiler:str="", node_modules:str="",
+            node_options:list=[],
             visibility:list=None, labels:list=[], timeout:int=0,
             flaky:bool|int=0, size:str=None):
     """TypeScript tests, under `plz test`.
@@ -649,6 +650,10 @@ def ts_test(name:str, lib:str="", main:str="", srcs:list=[], deps:list=[],
         tsconfig_deps: The configs it extends.
         root: The prefix stripped from the suite's sources, as ts_library
               takes it.
+        module_type: The suite's package.json "type", as ts_library takes it:
+                     "module" where the tsconfig makes the tests ES modules,
+                     so node reads them as what they are. A suite then shares
+                     the tsconfig of the library it tests.
         compiler: node_modules tree holding the compiler. Defaults to the
                   Compiler config.
         transpiler: What writes the suite's JavaScript, as ts_library takes
@@ -689,6 +694,7 @@ def ts_test(name:str, lib:str="", main:str="", srcs:list=[], deps:list=[],
         deps = deps,
         package = package_name().replace("/", "-") + "-" + name,
         root = root,
+        module_type = module_type,
         tsconfig = tsconfig,
         tsconfig_deps = tsconfig_deps,
         compiler = compiler,

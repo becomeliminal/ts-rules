@@ -21,10 +21,14 @@
 // different JavaScript from what the tsconfig asks for is the one thing a
 // second emitter must never do.
 //
+// One thing it writes that neither a transpiler nor the compiler would: the
+// file name on a relative import. See exactImports below.
+//
 // A transpiler is an adapter module: see adapterContract below.
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { init as initLexer, parse as lexImports } from "es-module-lexer";
 
 class Refusal extends Error {}
 const refuse = (message) => {
@@ -201,6 +205,64 @@ function formatOf(file, kind, options, moduleType) {
   return refuse(`compilerOptions.module "${options.module}" is not a format a transpiler here writes: use commonjs, an ES module setting, or a node one`);
 }
 
+// The extensions an import with none is resolved through, in the compiler's
+// own order, for a file and then for a directory's index.
+const RESOLVED_THROUGH = [".ts", ".tsx", ".js", ".jsx"];
+
+// Where a relative import written with no extension leads: another source of
+// this library, or its directory's index. Undefined for anything else -- a
+// package, a path already naming a file, a stylesheet -- which is left exactly
+// as written.
+function emittedTarget(specifier, importer, emitted) {
+  if (!specifier.startsWith("./") && !specifier.startsWith("../")) return undefined;
+  const named = path.resolve(path.dirname(importer), specifier);
+  for (const ext of RESOLVED_THROUGH) {
+    if (emitted.has(named + ext)) return emitted.get(named + ext);
+  }
+  for (const ext of RESOLVED_THROUGH) {
+    const index = path.join(named, `index${ext}`);
+    if (emitted.has(index)) return emitted.get(index);
+  }
+  return undefined;
+}
+
+// Writes the file each relative import means into an ES module.
+//
+// Sources import one another as `./palette`, with no extension, because that
+// is what every tool reading TypeScript accepts. The compiler and both
+// transpilers copy the path into the JavaScript unchanged. A bundler loads the
+// result, since it tries extensions; so does node's CommonJS loader. Node's ES
+// module loader does not, and nor does anything that hands a package to it --
+// vitest does, for one that declares "type": "module". So a library emitted as
+// ES modules was one only a bundler could load, and its own tests could not.
+//
+// This driver knows every file it emits, so it knows what `./palette` names:
+// palette.js, or palette/index.js. It says so, and the package loads in node
+// and a bundler alike with the sources untouched. Only an ES module needs it,
+// and only an import of a source being emitted here is changed.
+//
+// The specifiers are found with a lexer, not a pattern: an import inside a
+// string, a comment or a template is not one. A source map keeps its lines; on
+// a line whose import was lengthened, columns after it are off by the
+// difference.
+function exactImports(code, job, emitted) {
+  if (job.format !== "esm") return code;
+  const [imports] = lexImports(code);
+  let out = code;
+  // Last first, so an earlier position is still where the lexer found it.
+  for (const record of imports.toReversed()) {
+    if (typeof record.specifier !== "string") continue;
+    const target = emittedTarget(record.specifier, job.source, emitted);
+    if (!target) continue;
+    let exact = path.relative(path.dirname(job.dest), target).split(path.sep).join("/");
+    if (!exact.startsWith(".")) exact = `./${exact}`;
+    // A dynamic import's range is its argument, quotes included.
+    const quote = record.type === "dynamic" ? out[record.start] : "";
+    out = out.slice(0, record.start) + quote + exact + quote + out.slice(record.end);
+  }
+  return out;
+}
+
 function sourceMapFor(map, source, dest, options) {
   const parsed = typeof map === "string" ? JSON.parse(map) : { ...map };
   parsed.file = path.basename(dest);
@@ -216,7 +278,9 @@ async function main() {
   const root = args.root || ".";
   const options = resolveOptions(JSON.parse(fs.readFileSync(args.config, "utf8")));
 
-  const adapterPath = args.adapter ?? path.join(path.dirname(new URL(import.meta.url).pathname), "adapter.mjs");
+  // In a ts_transpiler directory the driver sits in driver/, with its own
+  // tree, beside the adapter and the tree holding the adapter's tool.
+  const adapterPath = args.adapter ?? path.join(path.dirname(new URL(import.meta.url).pathname), "../adapter.mjs");
   const adapter = await import(pathToFileURL(path.resolve(adapterPath)).href);
   for (const part of adapterContract) {
     if (adapter[part] === undefined) refuse(`${adapterPath} is not a transpiler adapter: it exports no ${part}`);
@@ -259,6 +323,10 @@ async function main() {
     jobs.push({ source: file, dest, format: formatOf(file, kind, options, args.moduleType) });
   }
 
+  // Every source being transpiled, by its path, and the file it becomes.
+  const emitted = new Map(jobs.filter((job) => job.source).map((job) => [path.resolve(job.source), job.dest]));
+  await initLexer;
+
   await Promise.all(
     jobs.map(async (job) => {
       fs.mkdirSync(path.dirname(job.dest), { recursive: true });
@@ -278,7 +346,7 @@ async function main() {
       } catch (error) {
         refuse(`${adapter.name} could not transpile ${job.source}: ${error.message}`);
       }
-      let code = result.code;
+      let code = exactImports(result.code, job, emitted);
       if (args.sourceMap) {
         if (!result.map) refuse(`${adapter.name} returned no source map for ${job.source}`);
         fs.writeFileSync(`${job.dest}.map`, sourceMapFor(result.map, job.source, job.dest, options));
