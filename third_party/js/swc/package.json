@@ -1,0 +1,7 @@
+{
+  "name": "swc-pin",
+  "private": true,
+  "dependencies": {
+    "@swc/core": "1.16.13"
+  }
+}
