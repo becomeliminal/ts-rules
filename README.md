@@ -106,6 +106,18 @@ A transpiler reads one file at a time and no types, so:
 - a source the compiler emitted no declaration for fails the build too: it was
   left out of the program, so nothing type-checked it.
 
+One thing is written that neither the compiler nor a transpiler writes: the
+file name on a relative import. Sources say `./palette`, with no extension,
+because every tool that reads TypeScript accepts that, and every emitter
+copies it into the JavaScript unchanged. A bundler loads the result and so
+does `require`; node's ES module loader does not, so a library emitted as ES
+modules could be bundled and could not be run -- not by its own tests, and not
+by vitest, which hands a package declaring `"type": "module"` to node. The
+driver knows every file it emits, so in an ES module it writes what the import
+means, `./palette.js` or `./palette/index.js`, and one build of a library
+serves a bundler and node alike with its sources untouched. `test/loadable`
+is that: a library and its `ts_test` suite on one tsconfig, loaded by node.
+
 `ts_transpiler` makes one of your own: an adapter module (a `transpile`
 function and the list of options it implements) and the tree holding its
 tool. The plugin's esbuild and swc are built with it, in `tools/transpile`,

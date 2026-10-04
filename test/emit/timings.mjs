@@ -126,7 +126,7 @@ const compile = (tree, ...flags) => () => [node, tsc(tree), "-p", "tsconfig.json
 // As the rule runs it: into a directory already holding the declarations the
 // compiler emitted, which the driver insists on.
 const transpile = (transpiler) => (input) =>
-  [node, path.join(transpiler, "driver.mjs"), "--config", "resolved.json", "--root", ".", "--out", "declared", "--", ...input.files];
+  [node, path.join(transpiler, "driver/driver.mjs"), "--config", "resolved.json", "--root", ".", "--out", "declared", "--", ...input.files];
 
 const rows = [
   ["tsgo", "type-check, JS, declarations", compile(tsgoTree)],
