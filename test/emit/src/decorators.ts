@@ -4,11 +4,11 @@
 export type Applied = { kind: string; name: string };
 export const applied: Applied[] = [];
 
-function sealed(target: Function): void {
+function sealed(target: { name: string }): void {
   applied.push({ kind: "class", name: target.name });
 }
 
-function logged(_target: object, key: string, _descriptor: PropertyDescriptor): void {
+function logged(_target: object, key: string): void {
   applied.push({ kind: "method", name: key });
 }
 

@@ -158,3 +158,6 @@ The tests are the living documentation: source maps, declaration maps,
 generate_trace, allowJs, JSON modules, mixed js/ts packages, the shared-base
 ts_config arrangement, and the rootDir failure mode all have fixtures under
 `test/`. `plz test //...` runs them all.
+
+`plz lint` runs ESLint over the repository's own JavaScript and TypeScript
+(`tools/eslint`), from the tree js-rules pins.
