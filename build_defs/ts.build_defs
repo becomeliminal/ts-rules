@@ -30,6 +30,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
                tsconfig_deps:list=[],
                module_type:str="", compiler:str="", transpiler:str="",
                node_modules:str="", type_roots:list=[],
+               side_effects:list|bool=None,
                source_map:bool=False, declaration_map:bool=False,
                generate_trace:bool=False,
                args:list=[], visibility:list=None,
@@ -84,6 +85,11 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
                        both called tsconfig.json would collide on basename.
         module_type: The package.json "type" field. Stated here rather than read
                      out of the tsconfig, so nothing in this plugin parses one.
+        side_effects: The package.json "sideEffects" field, as js_library
+                      takes it: False, or the globs of the files that do have
+                      them. It is what lets a bundler drop a module nobody
+                      imports from even though it computes something at its
+                      top level. Unset, the field is not written.
         source_map: Emit a .js.map beside each emitted file, so a stack trace
                     from this library's output points at the TypeScript it was
                     written as.
@@ -187,7 +193,10 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     # the package can reach the compiler's own output.
     out_dir = "_ts_out"
 
-    set_flags = f"--set type={module_type}" if module_type else ""
+    set_flags = " ".join([
+        f"--set type={module_type}" if module_type else "",
+        side_effects_flag(side_effects),
+    ])
 
     return build_rule(
         name = name,

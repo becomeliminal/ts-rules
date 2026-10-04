@@ -22,6 +22,12 @@ test("the JavaScript and JSON beside the TypeScript are in the package", () => {
   assert.deepEqual(JSON.parse(fs.readFileSync(`${pkg}/limits.json`, "utf8")), { times: 2 });
 });
 
+test("the manifest says the library has no side effects, in both halves", () => {
+  for (const half of [pkg, "test/transpiled/lib_types/pkg"]) {
+    assert.strictEqual(JSON.parse(fs.readFileSync(`${half}/package.json`, "utf8")).sideEffects, false);
+  }
+});
+
 test("the source map points at the TypeScript it came from", () => {
   const map = JSON.parse(fs.readFileSync(`${pkg}/index.js.map`, "utf8"));
   assert.equal(map.file, "index.js");
