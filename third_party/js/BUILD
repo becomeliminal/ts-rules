@@ -252,3 +252,41 @@ npm_link(
     ],
     visibility = ["PUBLIC"],
 )
+
+# esbuild and swc, compared with the compilers in //test/emit: each a tree of
+# its own (esbuild/, swc/), pinned and hash-checked like the compiler's. Every
+# platform's package is listed and npm_repo fetches only those that can run
+# here. The one sanctioned way a tree changes: edit its package.json, then
+# `plz run` the matching target here.
+npm_update(
+    name = "update-swc",
+    dir = "third_party/js/swc",
+)
+
+npm_update(
+    name = "update-esbuild",
+    dir = "third_party/js/esbuild",
+)
+
+# swc's tree as anything here uses it: the one //third_party/js/swc links, with
+# the native addon unpacked. unpack_swc.mjs says why the tree cannot be used
+# as npm delivers it.
+build_rule(
+    name = "swc_modules",
+    srcs = {
+        "tree": ["//third_party/js/swc:node_modules"],
+        "script": ["unpack_swc.mjs"],
+    },
+    outs = ["swc_modules"],
+    cmd = " && ".join([
+        'NODE=$(readlink -f "$TOOLS_NODE")',
+        'cp -R "$SRCS_TREE" "$OUT"',
+        # Remote execution stages inputs read-only, and cp keeps the mode.
+        'chmod -R u+w "$OUT"',
+        # zstd in node's zlib is marked experimental and says so on stderr.
+        '"$NODE" --disable-warning=ExperimentalWarning "$SRCS_SCRIPT" "$OUT"',
+    ]),
+    building_description = "Unpacking swc...",
+    tools = {"node": [CONFIG.JS.NODE_TOOL]},
+    visibility = ["PUBLIC"],
+)

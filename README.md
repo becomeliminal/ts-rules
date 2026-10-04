@@ -69,6 +69,39 @@ application graph -- and so one repo can run TypeScript 7 (tsgo) and
 TypeScript 5.x side by side. Both are tested here; the `Compiler` config key
 selects per repo or per rule.
 
+## Emitters, compared
+
+A compiler that type-checks also writes JavaScript, and it is not the only
+thing that can. `test/emit` holds the comparison as tests: the same sources
+emitted by tsgo (TypeScript 7), tsc 5.9, esbuild and swc, as ES modules and as
+CommonJS, each loaded under node and held to the same behaviour. What it
+establishes, for the versions pinned here:
+
+- tsgo and tsc 5.9 write byte-identical JavaScript.
+- esbuild and swc mark an `enum` as free of side effects, so a bundler drops
+  one nobody uses. tsgo and tsc do not.
+- tsgo, tsc and swc write decorator metadata (`emitDecoratorMetadata`).
+  esbuild accepts the option and writes none.
+- Class fields, import elision, CommonJS interop and JSX behave the same under
+  all four.
+
+`ts_library` compiles with tsgo or tsc. Nothing here makes esbuild or swc its
+emitter; the suite is the evidence for deciding whether something should.
+
+What each costs is a report rather than a test, since a duration is a
+measurement:
+
+```sh
+plz build //test/emit:timings && cat plz-out/gen/test/emit/timings.md
+```
+
+esbuild and swc each have a hash-pinned tree under `third_party/js`,
+regenerated like any other (`plz run //third_party/js:update-swc`). swc's is
+used through `//third_party/js:swc_modules`, which unpacks its native addon:
+from 1.16.12 swc ships the addon compressed and unpacks it into a per-user
+cache at load, which a build action does not have. `unpack_swc.mjs` has the
+detail.
+
 ## Where to look
 
 The tests are the living documentation: source maps, declaration maps,
