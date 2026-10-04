@@ -73,3 +73,8 @@ gotool = ///js//third_party/go:gotool|go
 ; No [Parse] preloadsubincludes: that config ships to every consumer, so
 ; anything preloaded here becomes a requirement on any repo that parses a
 ; package of this plugin. rust-rules documents avoiding it for the same reason.
+
+; plz lint: ESLint over this repository's JavaScript and TypeScript.
+[alias "lint"]
+desc = Lints the JavaScript and TypeScript in this repository
+cmd = run //tools/eslint -- .

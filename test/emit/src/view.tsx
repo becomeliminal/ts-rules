@@ -2,6 +2,7 @@
 export type VNode = { tag: string; props: Record<string, unknown> | null; children: unknown[] };
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- JSX is typed through this namespace; it has no module form
   namespace JSX {
     type Element = VNode;
     interface IntrinsicElements {
