@@ -13,6 +13,8 @@ ts_library(
         "legacy.js",
         "limits.json",
     ],
+    # Nothing here is loaded for its effect.
+    side_effects = False,
     source_map = True,
     transpiler = "esbuild",
     tsconfig_deps = ["//:tsconfig.json"],
