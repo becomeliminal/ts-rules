@@ -1,17 +1,18 @@
 // What each emitter costs, measured through the trees pinned in this repo.
 //
-//   node timings.mjs <out.md> <emit.mjs> <tsgo tree> <tsc5 tree> <tool dir>
+//   node timings.mjs <out.md> <tsgo tree> <tsc5 tree> <esbuild transpiler> <swc transpiler>
 //
 // Each figure is the best of seven runs of a whole process, because a build
 // action is a whole process: node's startup and the tool's own are part of
-// what a rule pays. Two inputs, both generated here so the measurement needs
+// what a rule pays, and the transpilers run exactly as ts_library runs them:
+// through the driver, from their ts_transpiler directories. Two inputs, both generated here so the measurement needs
 // nothing but this file: a chain of small modules, each importing the last,
 // and one large module shaped like generated API types.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const [report, driver, tsgoTree, tsc5Tree, toolDir] = process.argv.slice(2);
+const [report, tsgoTree, tsc5Tree, esbuild, swc] = process.argv.slice(2);
 const RUNS = 7;
 
 function chained(dir, count) {
@@ -88,7 +89,7 @@ const TSCONFIG = {
     types: [],
     rootDir: ".",
   },
-  include: ["**/*.ts"],
+  include: ["*.ts"],
 };
 
 const node = process.execPath;
@@ -114,23 +115,18 @@ const inputs = [
 for (const input of inputs) {
   input.make(input.dir);
   fs.writeFileSync(path.join(input.dir, "tsconfig.json"), JSON.stringify(TSCONFIG));
+  fs.writeFileSync(path.join(input.dir, "resolved.json"), JSON.stringify({ compilerOptions: TSCONFIG.compilerOptions }));
   input.files = fs.readdirSync(input.dir).filter((f) => f.endsWith(".ts")).sort();
+  // Not timed: the declarations a transpiler's output is checked against.
+  execFileSync(node, [tsc(tsgoTree), "-p", "tsconfig.json", "--outDir", "declared", "--emitDeclarationOnly"], { cwd: input.dir });
   input.lines = input.files.reduce((n, f) => n + fs.readFileSync(path.join(input.dir, f), "utf8").split("\n").length, 0);
 }
 
-const transpile = (tool) => (input) =>
-  [node, path.join(toolDir, tool, path.basename(driver)), tool, "esm", "tsconfig.json", ".", `out-${tool}`, ...input.files];
 const compile = (tree, ...flags) => () => [node, tsc(tree), "-p", "tsconfig.json", "--outDir", "out", ...flags];
-// esbuild's own executable, with no node in front of it: the package for this
-// platform, found beside the esbuild package that depends on it.
-const esbuildBinary = () => {
-  const esbuild = fs.realpathSync(path.join(toolDir, "esbuild/node_modules/esbuild"));
-  const scope = path.join(path.dirname(esbuild), "@esbuild");
-  const [platform] = fs.readdirSync(scope).filter((p) => fs.existsSync(path.join(scope, p, "bin/esbuild")));
-  if (!platform) throw new Error(`no esbuild executable for this platform under ${scope}`);
-  return path.join(scope, platform, "bin/esbuild");
-};
-const native = (input) => [esbuildBinary(), ...input.files, "--outdir=out-esbuild-native", "--format=esm", "--target=es2022", "--log-level=warning"];
+// As the rule runs it: into a directory already holding the declarations the
+// compiler emitted, which the driver insists on.
+const transpile = (transpiler) => (input) =>
+  [node, path.join(transpiler, "driver.mjs"), "--config", "resolved.json", "--root", ".", "--out", "declared", "--", ...input.files];
 
 const rows = [
   ["tsgo", "type-check, JS, declarations", compile(tsgoTree)],
@@ -138,9 +134,8 @@ const rows = [
   ["tsgo", "type-check only", compile(tsgoTree, "--noEmit")],
   ["tsc 5.9", "type-check, JS, declarations", compile(tsc5Tree)],
   ["tsc 5.9", "type-check, declarations", compile(tsc5Tree, "--emitDeclarationOnly")],
-  ["esbuild", "JS only, its own executable", native],
-  ["esbuild", "JS only, through its node API", transpile("esbuild")],
-  ["swc", "JS only, through its node API", transpile("swc")],
+  ["esbuild", "JS only", transpile(esbuild)],
+  ["swc", "JS only", transpile(swc)],
   ["node", "starting, and nothing else", () => [node, "-e", "0"]],
 ];
 
