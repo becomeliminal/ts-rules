@@ -1,0 +1,181 @@
+// The driver's decisions, tested through an adapter that makes none: which
+// files it transpiles, the format and name each gets, and above all what it
+// refuses. Every refusal here is a build that would otherwise have shipped
+// JavaScript the tsconfig did not describe or nothing type-checked.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+
+const HERE = path.resolve("tools/transpile");
+const DRIVER = path.join(HERE, "driver.mjs");
+const ECHO = path.join(HERE, "testdata/echo.mjs");
+
+const BASE = { target: "es2022", module: "esnext", isolatedModules: true };
+
+// A library in a temporary directory: its sources, the declarations the
+// compiler would have emitted for them, and the resolved config.
+function library(files, compilerOptions, { declare = Object.keys(files) } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "driver-"));
+  for (const [name, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), content);
+  }
+  for (const name of declare) {
+    const rel = path.relative("src", name).replace(/\.(ts|tsx|js|jsx)$/, ".d.ts").replace(/\.m(ts|js)$/, ".d.mts").replace(/\.c(ts|js)$/, ".d.cts");
+    fs.mkdirSync(path.dirname(path.join(dir, "out", rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, "out", rel), "export {};\n");
+  }
+  fs.writeFileSync(path.join(dir, "resolved.json"), JSON.stringify({ compilerOptions }));
+  return dir;
+}
+
+function drive(dir, files, extra = [], adapter = ECHO) {
+  const adapterArgs = adapter ? ["--adapter", adapter] : [];
+  const driver = adapter ? DRIVER : path.join(extra.shift(), "driver.mjs");
+  const run = spawnSync(
+    process.execPath,
+    [driver, "--config", "resolved.json", "--root", "src", "--out", "out", ...adapterArgs, ...extra, "--", ...files],
+    { cwd: dir, encoding: "utf8" },
+  );
+  return { status: run.status, stderr: run.stderr, read: (f) => fs.readFileSync(path.join(dir, "out", f), "utf8") };
+}
+
+const refused = (run, ...fragments) => {
+  assert.equal(run.status, 1, run.stderr);
+  for (const fragment of fragments) assert.match(run.stderr, fragment);
+};
+
+test("a source becomes a .js beside its declaration, as an ES module", () => {
+  const dir = library({ "src/a.ts": "export const a = 1;\n", "src/deep/b.tsx": "export const b = 2;\n" }, BASE);
+  const run = drive(dir, ["src/a.ts", "src/deep/b.tsx"]);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.read("a.js"), /^\/\/ esm es2022 src\/a\.ts\n/);
+  assert.match(run.read("deep/b.js"), /^\/\/ esm /);
+});
+
+test("the module setting decides the format", () => {
+  for (const [module, moduleType, format] of [
+    ["commonjs", "", "cjs"],
+    ["esnext", "", "esm"],
+    ["preserve", "", "esm"],
+    ["nodenext", "", "cjs"],
+    ["nodenext", "module", "esm"],
+    ["node16", "commonjs", "cjs"],
+  ]) {
+    const dir = library({ "src/a.ts": "export {};\n" }, { ...BASE, module });
+    const run = drive(dir, ["src/a.ts"], moduleType ? ["--module-type", moduleType] : []);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.read("a.js"), new RegExp(`^// ${format} `), `module ${module}, type "${moduleType}"`);
+  }
+});
+
+test("an .mts or .cts source fixes its own format and extension", () => {
+  const dir = library({ "src/m.mts": "export {};\n", "src/c.cts": "export {};\n" }, { ...BASE, module: "nodenext" });
+  const run = drive(dir, ["src/m.mts", "src/c.cts"]);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.read("m.mjs"), /^\/\/ esm /);
+  assert.match(run.read("c.cjs"), /^\/\/ cjs /);
+});
+
+test("preserved JSX keeps the .jsx extension", () => {
+  const dir = library({ "src/v.tsx": "export {};\n" }, { ...BASE, jsx: "preserve" });
+  const run = drive(dir, ["src/v.tsx"]);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.read("v.jsx"), /^\/\/ esm /);
+});
+
+test("declarations are left alone, and JavaScript is transpiled only under allowJs", () => {
+  const files = { "src/a.ts": "export {};\n", "src/types.d.ts": "export {};\n", "src/legacy.js": "export {};\n" };
+  const without = library(files, BASE, { declare: ["src/a.ts"] });
+  const run = drive(without, Object.keys(files));
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(fs.readdirSync(path.join(without, "out")).sort(), ["a.d.ts", "a.js"]);
+
+  const withJs = library(files, { ...BASE, allowJs: true }, { declare: ["src/a.ts", "src/legacy.js"] });
+  assert.equal(drive(withJs, Object.keys(files)).status, 0);
+  assert.ok(fs.existsSync(path.join(withJs, "out/legacy.js")));
+});
+
+test("a JSON module is copied when the tsconfig resolves them", () => {
+  const files = { "src/a.ts": "export {};\n", "src/data.json": '{"n": 1}\n' };
+  const dir = library(files, { ...BASE, resolveJsonModule: true }, { declare: ["src/a.ts"] });
+  const run = drive(dir, Object.keys(files));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.read("data.json"), '{"n": 1}\n');
+});
+
+test("a source map names its file and the path back to the source", () => {
+  const dir = library({ "src/deep/a.ts": "export const a = 1;\n" }, BASE);
+  const run = drive(dir, ["src/deep/a.ts"], ["--source-map"]);
+  assert.equal(run.status, 0, run.stderr);
+  const map = JSON.parse(run.read("deep/a.js.map"));
+  assert.equal(map.file, "a.js");
+  assert.deepEqual(map.sources, ["../../src/deep/a.ts"]);
+  // Not asked for by inlineSources, so not shipped.
+  assert.equal(map.sourcesContent, undefined);
+  assert.match(run.read("deep/a.js"), /\n\/\/# sourceMappingURL=a\.js\.map\n$/);
+});
+
+test("refuses a tsconfig without isolatedModules", () => {
+  const dir = library({ "src/a.ts": "export {};\n" }, { target: "es2022", module: "esnext" });
+  refused(drive(dir, ["src/a.ts"]), /isolatedModules/);
+  assert.ok(!fs.existsSync(path.join(dir, "out/a.js")));
+});
+
+test("refuses a tsconfig that leaves target or module to the compiler's default", () => {
+  refused(drive(library({ "src/a.ts": "" }, { module: "esnext", isolatedModules: true }), ["src/a.ts"]), /must set "target"/);
+  refused(drive(library({ "src/a.ts": "" }, { target: "es2022", isolatedModules: true }), ["src/a.ts"]), /must set "module"/);
+});
+
+test("refuses an option that changes emitted JavaScript and the adapter does not implement", () => {
+  const dir = library({ "src/a.ts": "export {};\n" }, { ...BASE, emitDecoratorMetadata: true });
+  refused(drive(dir, ["src/a.ts"]), /echo does not implement compilerOptions\.emitDecoratorMetadata/);
+});
+
+test("an option left at the value that asks for nothing is not a request", () => {
+  const dir = library({ "src/a.ts": "export {};\n" }, { ...BASE, emitDecoratorMetadata: false, newLine: "lf", strict: true });
+  assert.equal(drive(dir, ["src/a.ts"]).status, 0);
+});
+
+test("refuses a source the compiler emitted no declaration for", () => {
+  const files = { "src/a.ts": "export {};\n", "src/unchecked.ts": "export {};\n" };
+  const dir = library(files, BASE, { declare: ["src/a.ts"] });
+  refused(drive(dir, Object.keys(files)), /src\/unchecked\.ts is in srcs/, /nothing type-checked/);
+});
+
+test("refuses a source outside the root", () => {
+  const dir = library({ "src/a.ts": "export {};\n", "elsewhere/b.ts": "export {};\n" }, BASE, { declare: ["src/a.ts"] });
+  refused(drive(dir, ["src/a.ts", "elsewhere/b.ts"]), /elsewhere\/b\.ts is outside the root/);
+});
+
+test("refuses a package.json that disagrees with the rule about the package's type", () => {
+  const files = { "src/a.ts": "export {};\n", "package.json": '{"type": "module"}\n' };
+  const dir = library(files, { ...BASE, module: "nodenext" }, { declare: ["src/a.ts"] });
+  refused(drive(dir, ["src/a.ts"]), /"type": "module"/, /module_type/);
+  // Agreeing, it is an ES module.
+  const run = drive(dir, ["src/a.ts"], ["--module-type", "module"]);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.read("a.js"), /^\/\/ esm /);
+});
+
+test("refuses a module that is not an adapter", () => {
+  const dir = library({ "src/a.ts": "export {};\n" }, BASE);
+  refused(drive(dir, ["src/a.ts"], [], DRIVER), /is not a transpiler adapter/);
+});
+
+// The two this plugin ships, run from their ts_transpiler directories exactly
+// as ts_library runs them.
+test("esbuild refuses emitDecoratorMetadata, which it cannot implement, and swc accepts it", () => {
+  const source = "function d(_t: object, _k: string): void {}\nexport class A {\n  @d\n  name: string = \"a\";\n}\n";
+  const options = { ...BASE, experimentalDecorators: true, emitDecoratorMetadata: true };
+
+  const esbuild = drive(library({ "src/a.ts": source }, options), ["src/a.ts"], [path.join(HERE, "esbuild")], null);
+  refused(esbuild, /esbuild does not implement compilerOptions\.emitDecoratorMetadata/);
+
+  const swc = drive(library({ "src/a.ts": source }, options), ["src/a.ts"], [path.join(HERE, "swc")], null);
+  assert.equal(swc.status, 0, swc.stderr);
+  assert.match(swc.read("a.js"), /design:type/);
+});

@@ -29,6 +29,30 @@ DefaultValue = tsc
 Help = Executable that package publishes.
 Inherit = true
 
+[PluginConfig "transpiler"]
+ConfigKey = Transpiler
+DefaultValue = tsc
+Help = What writes a ts_library's JavaScript. tsc means the compiler, which also type-checks it. esbuild and swc name the transpilers this plugin ships, and a build label names a ts_transpiler target of your own. With anything but tsc the compiler still type-checks every source and writes its declarations, in the same build action, and the transpiler writes the JavaScript -- differently where it matters: both mark an enum as free of side effects, which lets a bundler drop one nobody uses.
+Inherit = true
+
+[PluginConfig "esbuild_transpiler"]
+ConfigKey = EsbuildTranspiler
+DefaultValue = ///ts//tools/transpile:esbuild
+Help = The ts_transpiler that transpiler = "esbuild" names. The plugin pins its own esbuild; point this at a ts_transpiler over your own tree to choose the version.
+Inherit = true
+
+[PluginConfig "swc_transpiler"]
+ConfigKey = SwcTranspiler
+DefaultValue = ///ts//tools/transpile:swc
+Help = The ts_transpiler that transpiler = "swc" names.
+Inherit = true
+
+[PluginConfig "transpile_driver"]
+ConfigKey = TranspileDriver
+DefaultValue = ///ts//tools/transpile:driver
+Help = The program every ts_transpiler runs under: it reads the resolved tsconfig, decides each file's module format and refuses options the transpiler does not implement.
+Inherit = true
+
 [Plugin "js"]
 Target = //plugins:js
 ; js-rules' own toolchain target lives in its subrepo and would need the node

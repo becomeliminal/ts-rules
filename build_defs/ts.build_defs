@@ -28,8 +28,8 @@ subinclude("///js//build_defs:js")
 def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str="",
                entry:str="index.ts", root:str="", tsconfig:str="tsconfig.json",
                tsconfig_deps:list=[],
-               module_type:str="", compiler:str="", node_modules:str="",
-               type_roots:list=[],
+               module_type:str="", compiler:str="", transpiler:str="",
+               node_modules:str="", type_roots:list=[],
                source_map:bool=False, declaration_map:bool=False,
                generate_trace:bool=False,
                args:list=[], visibility:list=None,
@@ -104,6 +104,27 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             Svelte and Astro checkers all still need a 5.x -- and one
             node_modules cannot hold two packages both called typescript.
             //test/tsc5 compiles and checks against a 5.9 to prove it.
+        transpiler: What writes the JavaScript. Defaults to the Transpiler
+                    config, which defaults to "tsc": the compiler writes it.
+
+            "esbuild" and "swc" are the transpilers this plugin ships, and a
+            label names a ts_transpiler target. With any of them the compiler
+            still type-checks every source and writes its declarations, here in
+            this action, and only the JavaScript changes hands -- so a library
+            that builds is a library that type-checks, whoever emitted it.
+
+            The reason to hand it over is what gets written. The compiler
+            emits an enum as a function call a bundler cannot prove harmless,
+            so every enum in a module an application imports stays in its
+            bundle; esbuild and swc mark the call as free of side effects.
+            It is not speed: the type-check is the cost either way.
+
+            A transpiler reads one file at a time, so the tsconfig must set
+            isolatedModules, target and module, and the build fails -- naming
+            the option -- if it sets anything that changes emitted JavaScript
+            and the transpiler does not implement, rather than emitting
+            something else. //test/emit holds all four emitters to the same
+            behaviour.
         node_modules: The tree the sources resolve their imports through.
                       Defaults to js-rules' NodeModules config.
         type_roots: node_modules trees whose @types packages the compiler
@@ -127,6 +148,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     root = root or package_name()
     compiler = compiler or CONFIG.TS.COMPILER
     node_modules = node_modules or CONFIG.JS.NODE_MODULES
+    transpiler = _transpiler("ts_library", name, transpiler)
 
     # The sources a development server links in place of the compiled package,
     # laid out as the package is: relative to root, which the compiler strips,
@@ -178,6 +200,7 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             "modules": [node_modules] if node_modules else [],
             "compiler": [compiler],
             "typeroots": type_roots,
+            "transpiler": [transpiler] if transpiler else [],
         },
         # The same two named outputs js_library emits, for the same measured
         # reason: Please invalidates per output, so a bundle narrowed to
@@ -214,7 +237,11 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             # says, so a rootDir in the chain that disagrees would be silently
             # ignored -- and the wrong emitted path is import paths inside
             # node_modules, which is much worse than the error this raises.
-            '"$NODE" "$BIN" -p "$SRCS_CONFIG" --showConfig > _showconfig.json',
+            #
+            # Resolved with the rule's own compiler flags applied, so it is the
+            # configuration the compiler runs under -- which a transpiler, when
+            # there is one, is handed as the statement of what to emit.
+            " ".join(['"$NODE" "$BIN" -p "$SRCS_CONFIG"'] + args + ["--showConfig > _showconfig.json"]),
         ] + ([
             # Every package under each tree's @types, named for --types, which
             # otherwise defaults to nothing in a tsconfig that sets types: [].
@@ -226,13 +253,26 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
             " ".join([
                 '"$NODE" "$BIN" -p "$SRCS_CONFIG"',
                 f"--rootDir {root} --outDir {out_dir}",
-                "--declaration --noEmit false --emitDeclarationOnly false",
+                # With a transpiler the compiler checks every source and writes
+                # the declarations, and leaves the JavaScript to it.
+                "--declaration --noEmit false --emitDeclarationOnly " + ("true" if transpiler else "false"),
                 "--tsBuildInfoFile _tsbuildinfo",
             ] + (['--typeRoots "$TYPE_ROOTS" --types "$TYPE_NAMES"'] if type_roots else [])
-              + (["--sourceMap"] if source_map else [])
+              + (["--sourceMap"] if source_map and not transpiler else [])
               + (["--declarationMap"] if declaration_map else [])
               + (["--generateTrace _trace"] if generate_trace else [])
               + args),
+        ] + ([
+            # After the compiler, into the same directory: the driver refuses
+            # to write JavaScript for a source the compiler emitted no
+            # declaration for, since that source was never type-checked.
+            " ".join([
+                '"$NODE" "$SRCS_TRANSPILER/driver.mjs"',
+                f"--config _showconfig.json --root '{root}' --out {out_dir}",
+            ] + ([f"--module-type {module_type}"] if module_type else [])
+              + (["--source-map"] if source_map else [])
+              + ["-- $SRCS_SRCS"]),
+        ] if transpiler else []) + [
 
             # Assemble the shape js_library produces, so a js_binary consumes it
             # without knowing TypeScript was involved. tsc emits .js and .d.ts
@@ -325,6 +365,83 @@ def ts_config(name:str, src:str="tsconfig.json", deps:list=[],
         test_only = test_only,
         labels = ["ts_config"],
     )
+
+
+def ts_transpiler(name:str, adapter:str, node_modules:str, visibility:list=None,
+                  test_only:bool&testonly=False):
+    """A transpiler a ts_library can hand its JavaScript to.
+
+    The compiler is the only thing that reads types, so it always type-checks a
+    library and writes its declarations. What writes the JavaScript is a
+    separate choice, and this is how one is made available: name the target as
+    a ts_library's `transpiler`, or as the Transpiler config for a whole repo.
+    The plugin's own esbuild and swc are two of these (///ts//tools/transpile),
+    built with nothing a repo's own could not use.
+
+    A transpiler is an adapter and the tree holding the tool it adapts. The
+    adapter is a JavaScript module the driver loads, exporting:
+
+        name        what to call it in messages
+        honours     the compiler options that change emitted JavaScript and
+                    that it implements, by name
+        transpile   async ({filename, source, format, options, sourceMap})
+                    returning {code, map}
+        close       optional, called once at the end
+
+    format is "esm" or "cjs", decided per file by the driver; options are the
+    resolved compiler options. Everything a transpiler would otherwise have to
+    get right about a tsconfig is the driver's, the same for all of them: which
+    format a file gets, which options matter, and failing the build when the
+    tsconfig asks for one the adapter does not list in `honours`. An adapter
+    is therefore about as long as the call to the tool it wraps.
+
+    Args:
+        name: Target name.
+        adapter: The adapter module, a file in this package.
+        node_modules: The tree holding the tool, from npm_link. Its own tree
+                      rather than the sources', for the reason the compiler
+                      has one: the tool's version is then pinned here and
+                      reaches nobody's lockfile.
+        visibility: Visibility specification.
+        test_only: If True, only visible to test rules.
+    """
+    return build_rule(
+        name = name,
+        srcs = {
+            "adapter": [adapter],
+            "driver": [CONFIG.TS.TRANSPILE_DRIVER],
+            "tree": [node_modules],
+        },
+        # One directory: the driver, the adapter it loads, and the tree the
+        # adapter's imports resolve through, beside one another the way any
+        # node program and its node_modules are.
+        outs = [name],
+        cmd = " && ".join([
+            'mkdir "$OUT"',
+            'cp "$SRCS_DRIVER" "$OUT/driver.mjs"',
+            'cp "$SRCS_ADAPTER" "$OUT/adapter.mjs"',
+            'cp -R "$SRCS_TREE" "$OUT/node_modules"',
+        ]),
+        visibility = visibility,
+        test_only = test_only,
+        labels = ["ts_transpiler"],
+        building_description = "Arranging...",
+    )
+
+
+def _transpiler(rule:str, name:str, transpiler:str):
+    """The ts_transpiler target a rule's transpiler names, or "" for the compiler."""
+    transpiler = transpiler or CONFIG.TS.TRANSPILER
+    if transpiler == "tsc":
+        return ""
+    if transpiler == "esbuild":
+        return CONFIG.TS.ESBUILD_TRANSPILER
+    if transpiler == "swc":
+        return CONFIG.TS.SWC_TRANSPILER
+    if transpiler.startswith("//") or transpiler.startswith(":"):
+        return transpiler
+    fail(f"{rule} {name}: transpiler is \"tsc\", \"esbuild\", \"swc\" or the label of a " +
+         f"ts_transpiler target, not \"{transpiler}\"")
 
 
 def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
@@ -489,8 +606,9 @@ def ts_binary(name:str, lib:str, main:str="", deps:list=[], node_modules:str="",
 def ts_test(name:str, lib:str="", main:str="", srcs:list=[], deps:list=[],
             data:list=[], env:dict={}, tsconfig:str="tsconfig.json",
             tsconfig_deps:list=[], root:str="", compiler:str="",
-            node_modules:str="", node_options:list=[], visibility:list=None,
-            labels:list=[], timeout:int=0, flaky:bool|int=0, size:str=None):
+            transpiler:str="", node_modules:str="", node_options:list=[],
+            visibility:list=None, labels:list=[], timeout:int=0,
+            flaky:bool|int=0, size:str=None):
     """TypeScript tests, under `plz test`.
 
     Two modes, as js_test has, because a test is one of two things.
@@ -524,6 +642,9 @@ def ts_test(name:str, lib:str="", main:str="", srcs:list=[], deps:list=[],
               takes it.
         compiler: node_modules tree holding the compiler. Defaults to the
                   Compiler config.
+        transpiler: What writes the suite's JavaScript, as ts_library takes
+                    it. Defaults to the Transpiler config, so a suite is
+                    emitted the way the libraries it tests are.
         node_modules: The third-party tree, from npm_link.
         node_options: Flags passed to node.
         visibility: Visibility specification.
@@ -562,6 +683,7 @@ def ts_test(name:str, lib:str="", main:str="", srcs:list=[], deps:list=[],
         tsconfig = tsconfig,
         tsconfig_deps = tsconfig_deps,
         compiler = compiler,
+        transpiler = transpiler,
         node_modules = node_modules,
         type_roots = [CONFIG.TS.NODE_TYPES] if CONFIG.TS.NODE_TYPES else [],
         test_only = True,
