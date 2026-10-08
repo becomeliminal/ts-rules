@@ -11,10 +11,7 @@ plugin_repo(
     name = "js",
     owner = "becomeliminal",
     plugin = "js-rules",
-    # Pinned past the platform-filtering change (TypeScript 7 ships twenty
-    # native compilers and this plugin fetches exactly one) and the link-tree,
-    # peer-merging and npm_workspace work consumers now build on.
-    revision = "11ef67710f9be3e9221d003a4f840579b807a8c7",
+    revision = "3cc69ed5d50392968f3c98100063b280aeb64fd4",
 )
 
 plugin_repo(
