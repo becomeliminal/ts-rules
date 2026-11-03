@@ -69,6 +69,26 @@ application graph -- and so one repo can run TypeScript 7 (tsgo) and
 TypeScript 5.x side by side. Both are tested here; the `Compiler` config key
 selects per repo or per rule.
 
+For application-only checks, `ts_check` accepts `backend = "tsgo"` (the
+default) or `backend = "bun"`. The repo-wide `CheckBackend` plugin config
+sets the default. Bun is a pinned native executable from node-rules; the
+action runs `bun check --no-script`, so a package's `check` script cannot
+replace the type checker. Both backends read the same tsconfig, dependency
+declarations, and source manifest, and fail if an explicit source is absent
+from the TypeScript project. They produce the same `.checked` stamp only after
+a successful check. Bun writes no declarations, so `ts_library` still uses the
+configured compiler for its `.d.ts` output.
+
+An application can switch one target without changing the repo default:
+
+```python
+ts_check(
+    name = "typecheck",
+    srcs = ["src/main.ts"],
+    backend = "bun",
+)
+```
+
 ## Transpilers
 
 The compiler is the only thing that reads types, so it always type-checks a

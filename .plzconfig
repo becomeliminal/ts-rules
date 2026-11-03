@@ -29,6 +29,12 @@ DefaultValue = tsc
 Help = Executable that package publishes.
 Inherit = true
 
+[PluginConfig "check_backend"]
+ConfigKey = CheckBackend
+DefaultValue = tsgo
+Help = Backend for ts_check: tsgo uses the configured TypeScript compiler; bun uses the pinned Bun toolchain. ts_library always uses the compiler to emit declarations.
+Inherit = true
+
 [PluginConfig "transpiler"]
 ConfigKey = Transpiler
 DefaultValue = tsc
