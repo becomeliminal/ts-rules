@@ -153,6 +153,8 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     check_package_name(package, name)
     root = root or package_name()
     compiler = compiler or CONFIG.TS.COMPILER
+    if compiler.endswith("|bun"):
+        fail(f"ts_library {name}: a Bun checker cannot emit declarations; use a TypeScript compiler tree")
     node_modules = node_modules or CONFIG.JS.NODE_MODULES
     transpiler = _transpiler("ts_library", name, transpiler)
 
@@ -456,7 +458,7 @@ def _transpiler(rule:str, name:str, transpiler:str):
 def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
              tsconfig_deps:list=[], compiler:str="", node_modules:str="",
              args:list=[], visibility:list=None, test_only:bool&testonly=False,
-             labels:list=[], backend:str=""):
+             labels:list=[]):
     """Type-checks sources without emitting anything.
 
     ts_library is the wrong shape for an application. An application is not
@@ -482,23 +484,17 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
               declarations, which is the whole reason ts_library emits them.
         tsconfig: The tsconfig for this package.
         tsconfig_deps: Every config in the extends chain.
-        compiler: node_modules tree holding the compiler. Defaults to the
-                  Compiler config. Used only by the tsgo backend.
+        compiler: TypeScript compiler node_modules tree or a Bun executable
+                  label ending in |bun. Defaults to the Compiler config.
         node_modules: The tree the sources resolve their imports through.
         args: Additional checker flags. tsgo sets --noEmit; Bun check never
               emits files.
-        backend: "tsgo" uses the configured TypeScript compiler; "bun" uses
-                 the pinned Bun executable. Defaults to CheckBackend.
         visibility: Visibility specification.
         test_only: If True, only visible to test rules.
         labels: Additional labels.
     """
-    backend = backend or CONFIG.TS.CHECK_BACKEND
-    if backend not in ["tsgo", "bun"]:
-        fail(f"ts_check {name}: backend is \"tsgo\" or \"bun\", not \"{backend}\"")
-    if backend == "bun" and compiler:
-        fail(f"ts_check {name}: compiler applies only to the tsgo backend")
     compiler = compiler or CONFIG.TS.COMPILER
+    bun = compiler.endswith("|bun")
     node_modules = node_modules or CONFIG.JS.NODE_MODULES
 
     # A dep narrowed to one named output (":lib|types") cannot travel as a
@@ -513,7 +509,7 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
     if tsconfig.startswith(":") or tsconfig.startswith("//"):
         deps += [tsconfig]
 
-    if backend == "tsgo":
+    if not bun:
         checker = " ".join([
             '"$NODE" "$BIN" -p "$SRCS_CONFIG" --noEmit --listFiles',
             "--tsBuildInfoFile _tsbuildinfo",
@@ -530,7 +526,7 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
         checker = " ".join(['"$BUN" check --no-script -p "$SRCS_CONFIG" --listFiles'] + args)
         checker_setup = ['BUN=$(readlink -f "$TOOLS_BUN")']
         checker_tools = {"please_js": [CONFIG.JS.PLEASE_JS_TOOL],
-                         "bun": [CONFIG.TS.BUN_TOOL]}
+                         "bun": [compiler]}
 
     return build_rule(
         name = name,
@@ -540,7 +536,7 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
             "config": [tsconfig],
             "extends": tsconfig_deps,
             "modules": [node_modules] if node_modules else [],
-            "compiler": [compiler] if backend == "tsgo" else [],
+            "compiler": [compiler] if not bun else [],
         },
         # A stamp, because a rule with no output cannot be depended on and would
         # not run. It records what was checked rather than being empty, so a

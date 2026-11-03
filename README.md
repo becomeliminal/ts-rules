@@ -69,15 +69,18 @@ application graph -- and so one repo can run TypeScript 7 (tsgo) and
 TypeScript 5.x side by side. Both are tested here; the `Compiler` config key
 selects per repo or per rule.
 
-For application-only checks, `ts_check` accepts `backend = "tsgo"` (the
-default) or `backend = "bun"`. The repo-wide `CheckBackend` plugin config
-sets the default. `BunTool` selects a pinned native executable from node-rules;
-action runs `bun check --no-script`, so a package's `check` script cannot
-replace the type checker. Both backends read the same tsconfig, dependency
-declarations, and source manifest, and fail if an explicit source is absent
-from the TypeScript project. They produce the same `.checked` stamp only after
-a successful check. Bun writes no declarations, so `ts_library` still uses the
-configured compiler for its `.d.ts` output.
+For application-only checks, `ts_check` can use its existing `compiler`
+argument to name the pinned Bun executable from node-rules. A label ending
+in `|bun` selects Bun; a compiler tree continues to use the configured
+TypeScript binary. The repo-wide `Compiler` plugin config sets the default,
+so projects containing `ts_library` targets should select Bun per check
+target and keep the default on TypeScript. The action runs
+`bun check --no-script`, so a package's `check` script cannot replace the
+type checker. Both paths read the same tsconfig, dependency declarations, and
+source manifest, and fail if an explicit source is absent from the TypeScript
+project. They produce the same `.checked` stamp only after a successful check.
+Bun writes no declarations, so `ts_library` requires a TypeScript compiler
+tree for its `.d.ts` output.
 
 An application can switch one target without changing the repo default:
 
@@ -85,7 +88,7 @@ An application can switch one target without changing the repo default:
 ts_check(
     name = "typecheck",
     srcs = ["src/main.ts"],
-    backend = "bun",
+    compiler = "///node//third_party/bun:bun|bun",
 )
 ```
 

@@ -40,7 +40,7 @@ jobs:
       - name: Test
         run: ./pleasew test //...
 
-      - name: Type-check both backends
+      - name: Type-check with both compilers
         run: ./pleasew build //test/check:check //test/check:bun_check
 
       - name: Reject type errors and omitted sources

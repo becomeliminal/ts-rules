@@ -7,7 +7,7 @@ Name = ts
 [PluginConfig "compiler"]
 ConfigKey = Compiler
 DefaultValue = ///ts//third_party/js:compiler
-Help = node_modules tree holding the TypeScript compiler. Kept separate from the consumer's tree so the plugin pins its own version, and so a second TypeScript can coexist: TS 7 has no stable programmatic API until 7.1, which typescript-eslint and Astro's checker need.
+Help = node_modules tree holding the TypeScript compiler. A ts_check may instead use a Bun executable label ending in |bun; ts_library requires the TypeScript tree to emit declarations. Kept separate from the consumer's tree so the plugin pins its own version, and so a second TypeScript can coexist.
 Inherit = true
 
 [PluginConfig "node_types"]
@@ -27,18 +27,6 @@ Inherit = true
 ConfigKey = CompilerBin
 DefaultValue = tsc
 Help = Executable that package publishes.
-Inherit = true
-
-[PluginConfig "check_backend"]
-ConfigKey = CheckBackend
-DefaultValue = tsgo
-Help = Backend for ts_check: tsgo uses the configured TypeScript compiler; bun uses the pinned Bun toolchain. ts_library always uses the compiler to emit declarations.
-Inherit = true
-
-[PluginConfig "bun_tool"]
-ConfigKey = BunTool
-DefaultValue = ///node//third_party/bun:bun|bun
-Help = Build label for the native Bun executable used by ts_check when CheckBackend is bun.
 Inherit = true
 
 [PluginConfig "transpiler"]
