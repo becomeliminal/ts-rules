@@ -13,3 +13,46 @@ ts_check(
     deps = ["//test/greeter|types"],
     tsconfig_deps = ["//:tsconfig.json"],
 )
+
+# The native checker has the same target contract as the compiler tree.
+ts_check(
+    name = "bun_check",
+    compiler = "///node//third_party/bun:bun|bun",
+    srcs = ["app.ts"],
+    deps = ["//test/greeter|types"],
+    tsconfig_deps = ["//:tsconfig.json"],
+)
+
+# CI builds these targets expecting failure, proving both compiler paths propagate
+# type errors and reject a source omitted by the TypeScript project config.
+ts_check(
+    name = "tsgo_error",
+    srcs = ["error.ts"],
+    tsconfig = "tsconfig.error.json",
+    tsconfig_deps = ["//:tsconfig.json"],
+)
+
+ts_check(
+    name = "bun_error",
+    compiler = "///node//third_party/bun:bun|bun",
+    srcs = ["error.ts"],
+    tsconfig = "tsconfig.error.json",
+    tsconfig_deps = ["//:tsconfig.json"],
+)
+
+ts_check(
+    name = "tsgo_omitted",
+    srcs = ["app.ts", "omitted.ts"],
+    deps = ["//test/greeter|types"],
+    tsconfig = "tsconfig.omitted.json",
+    tsconfig_deps = ["//:tsconfig.json"],
+)
+
+ts_check(
+    name = "bun_omitted",
+    compiler = "///node//third_party/bun:bun|bun",
+    srcs = ["app.ts", "omitted.ts"],
+    deps = ["//test/greeter|types"],
+    tsconfig = "tsconfig.omitted.json",
+    tsconfig_deps = ["//:tsconfig.json"],
+)

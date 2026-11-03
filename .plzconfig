@@ -7,7 +7,7 @@ Name = ts
 [PluginConfig "compiler"]
 ConfigKey = Compiler
 DefaultValue = ///ts//third_party/js:compiler
-Help = node_modules tree holding the TypeScript compiler. Kept separate from the consumer's tree so the plugin pins its own version, and so a second TypeScript can coexist: TS 7 has no stable programmatic API until 7.1, which typescript-eslint and Astro's checker need.
+Help = node_modules tree holding the TypeScript compiler. A ts_check may instead use a Bun executable label ending in |bun; ts_library requires the TypeScript tree to emit declarations. Kept separate from the consumer's tree so the plugin pins its own version, and so a second TypeScript can coexist.
 Inherit = true
 
 [PluginConfig "node_types"]

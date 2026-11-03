@@ -153,6 +153,8 @@ def ts_library(name:str, srcs:list, deps:list=[], assets:list=[], package:str=""
     check_package_name(package, name)
     root = root or package_name()
     compiler = compiler or CONFIG.TS.COMPILER
+    if compiler.endswith("|bun"):
+        fail(f"ts_library {name}: a Bun checker cannot emit declarations; use a TypeScript compiler tree")
     node_modules = node_modules or CONFIG.JS.NODE_MODULES
     transpiler = _transpiler("ts_library", name, transpiler)
 
@@ -482,16 +484,17 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
               declarations, which is the whole reason ts_library emits them.
         tsconfig: The tsconfig for this package.
         tsconfig_deps: Every config in the extends chain.
-        compiler: node_modules tree holding the compiler. Defaults to the
-                  Compiler config.
+        compiler: TypeScript compiler node_modules tree or a Bun executable
+                  label ending in |bun. Defaults to the Compiler config.
         node_modules: The tree the sources resolve their imports through.
-        args: Additional compiler flags. --noEmit is set here and cannot be
-              overridden, since it is the entire point.
+        args: Additional checker flags. tsgo sets --noEmit; Bun check never
+              emits files.
         visibility: Visibility specification.
         test_only: If True, only visible to test rules.
         labels: Additional labels.
     """
     compiler = compiler or CONFIG.TS.COMPILER
+    bun = compiler.endswith("|bun")
     node_modules = node_modules or CONFIG.JS.NODE_MODULES
 
     # A dep narrowed to one named output (":lib|types") cannot travel as a
@@ -506,6 +509,25 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
     if tsconfig.startswith(":") or tsconfig.startswith("//"):
         deps += [tsconfig]
 
+    if not bun:
+        checker = " ".join([
+            '"$NODE" "$BIN" -p "$SRCS_CONFIG" --noEmit --listFiles',
+            "--tsBuildInfoFile _tsbuildinfo",
+        ] + args)
+        checker_setup = [
+            'NODE=$(readlink -f "$TOOLS_NODE")',
+            'mkdir -p _compiler',
+            'cp -R "$SRCS_COMPILER/." _compiler/',
+            f'BIN=$(readlink -f "$("$PLEASE_JS" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
+        ]
+        checker_tools = {"please_js": [CONFIG.JS.PLEASE_JS_TOOL],
+                         "node": [CONFIG.JS.NODE_TOOL]}
+    else:
+        checker = " ".join(['"$BUN" check --no-script -p "$SRCS_CONFIG" --listFiles'] + args)
+        checker_setup = ['BUN=$(readlink -f "$TOOLS_BUN")']
+        checker_tools = {"please_js": [CONFIG.JS.PLEASE_JS_TOOL],
+                         "bun": [compiler]}
+
     return build_rule(
         name = name,
         srcs = {
@@ -514,7 +536,7 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
             "config": [tsconfig],
             "extends": tsconfig_deps,
             "modules": [node_modules] if node_modules else [],
-            "compiler": [compiler],
+            "compiler": [compiler] if not bun else [],
         },
         # A stamp, because a rule with no output cannot be depended on and would
         # not run. It records what was checked rather than being empty, so a
@@ -522,23 +544,18 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
         outs = [name + ".checked"],
         cmd = " && ".join([
             'PLEASE_JS=$(readlink -f "$TOOLS_PLEASE_JS")',
-            'NODE=$(readlink -f "$TOOLS_NODE")',
-            'mkdir -p _compiler',
-            'cp -R "$SRCS_COMPILER/." _compiler/',
+        ] + checker_setup + [
             'LIBS=$(find . -name node_modules -prune -o -name lib.json -print | ' +
             'while read m; do printf -- "--lib %s:%s " "$m" "$(dirname "$m")/pkg"; done)',
             '"$PLEASE_JS" overlay --tree "${SRCS_MODULES:-}" --out node_modules $LIBS',
-            f'BIN=$(readlink -f "$("$PLEASE_JS" resolve-bin --tree _compiler --package {CONFIG.TS.COMPILER_PACKAGE} --bin {CONFIG.TS.COMPILER_BIN})")',
-            " ".join([
-                '"$NODE" "$BIN" -p "$SRCS_CONFIG" --noEmit',
-                "--tsBuildInfoFile _tsbuildinfo",
-            ] + args),
+            'if ' + checker + ' > _checked_files 2>&1; then :; ' +
+            'else status=$?; cat _checked_files; exit "$status"; fi',
+            'for s in $SRCS_SRCS; do ' +
+            'grep -Fx -- "$(readlink -f "$s")" _checked_files >/dev/null || ' +
+            '{ echo "ts_check: source $s is absent from $SRCS_CONFIG" >&2; exit 1; }; done',
             'for s in $SRCS_SRCS; do echo "$s"; done > "$OUT"',
         ]),
-        tools = {
-            "please_js": [CONFIG.JS.PLEASE_JS_TOOL],
-            "node": [CONFIG.JS.NODE_TOOL],
-        },
+        tools = checker_tools,
         deps = deps,
         needs_transitive_deps = True,
         visibility = visibility,

@@ -39,3 +39,15 @@ jobs:
 
       - name: Test
         run: ./pleasew test //...
+
+      - name: Type-check with both compilers
+        run: ./pleasew build //test/check:check //test/check:bun_check
+
+      - name: Reject type errors and omitted sources
+        run: |
+          for target in tsgo_error bun_error tsgo_omitted bun_omitted; do
+            if ./pleasew build "//test/check:$target"; then
+              echo "Expected //test/check:$target to fail" >&2
+              exit 1
+            fi
+          done
