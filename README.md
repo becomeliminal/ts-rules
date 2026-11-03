@@ -76,9 +76,11 @@ TypeScript binary. The repo-wide `Compiler` plugin config sets the default,
 so projects containing `ts_library` targets should select Bun per check
 target and keep the default on TypeScript. The action runs
 `bun check --no-script`, so a package's `check` script cannot replace the
-type checker. Both paths read the same tsconfig, dependency declarations, and
-source manifest, and fail if an explicit source is absent from the TypeScript
-project. They produce the same `.checked` stamp only after a successful check.
+type checker. Both paths read the same tsconfig and dependency declarations.
+The `srcs` list declares action inputs; the tsconfig decides which files are
+type-checked. An extra declared input can be intentionally excluded from the
+TypeScript project. Both paths produce the same `.checked` stamp only after a
+successful check.
 Bun writes no declarations, so `ts_library` requires a TypeScript compiler
 tree for its `.d.ts` output.
 

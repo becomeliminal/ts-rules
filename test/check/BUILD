@@ -23,8 +23,7 @@ ts_check(
     tsconfig_deps = ["//:tsconfig.json"],
 )
 
-# CI builds these targets expecting failure, proving both compiler paths propagate
-# type errors and reject a source omitted by the TypeScript project config.
+# A configured source with a type error must fail under either compiler.
 ts_check(
     name = "tsgo_error",
     srcs = ["error.ts"],
@@ -41,18 +40,19 @@ ts_check(
 )
 
 ts_check(
-    name = "tsgo_omitted",
-    srcs = ["app.ts", "omitted.ts"],
+    name = "tsgo_extra_input",
+    srcs = ["app.ts", "error.ts"],
     deps = ["//test/greeter|types"],
-    tsconfig = "tsconfig.omitted.json",
+    # error.ts is an action input, but is excluded from this TS project.
+    tsconfig = "tsconfig.extra-input.json",
     tsconfig_deps = ["//:tsconfig.json"],
 )
 
 ts_check(
-    name = "bun_omitted",
+    name = "bun_extra_input",
     compiler = "///node//third_party/bun:bun|bun",
-    srcs = ["app.ts", "omitted.ts"],
+    srcs = ["app.ts", "error.ts"],
     deps = ["//test/greeter|types"],
-    tsconfig = "tsconfig.omitted.json",
+    tsconfig = "tsconfig.extra-input.json",
     tsconfig_deps = ["//:tsconfig.json"],
 )
