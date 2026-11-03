@@ -71,7 +71,7 @@ selects per repo or per rule.
 
 For application-only checks, `ts_check` accepts `backend = "tsgo"` (the
 default) or `backend = "bun"`. The repo-wide `CheckBackend` plugin config
-sets the default. Bun is a pinned native executable from node-rules; the
+sets the default. `BunTool` selects a pinned native executable from node-rules;
 action runs `bun check --no-script`, so a package's `check` script cannot
 replace the type checker. Both backends read the same tsconfig, dependency
 declarations, and source manifest, and fail if an explicit source is absent

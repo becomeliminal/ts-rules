@@ -18,5 +18,5 @@ plugin_repo(
     name = "node",
     owner = "becomeliminal",
     plugin = "node-rules",
-    revision = "f601d73e6528b59dc42fca07f3b725c4a0186200",
+    revision = "0be4beedb363106aff99b80ecbb2ed105e56af23",
 )

@@ -35,6 +35,12 @@ DefaultValue = tsgo
 Help = Backend for ts_check: tsgo uses the configured TypeScript compiler; bun uses the pinned Bun toolchain. ts_library always uses the compiler to emit declarations.
 Inherit = true
 
+[PluginConfig "bun_tool"]
+ConfigKey = BunTool
+DefaultValue = ///node//third_party/bun:bun|bun
+Help = Build label for the native Bun executable used by ts_check when CheckBackend is bun.
+Inherit = true
+
 [PluginConfig "transpiler"]
 ConfigKey = Transpiler
 DefaultValue = tsc

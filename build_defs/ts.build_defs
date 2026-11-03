@@ -530,7 +530,7 @@ def ts_check(name:str, srcs:list, deps:list=[], tsconfig:str="tsconfig.json",
         checker = " ".join(['"$BUN" check --no-script -p "$SRCS_CONFIG" --listFiles'] + args)
         checker_setup = ['BUN=$(readlink -f "$TOOLS_BUN")']
         checker_tools = {"please_js": [CONFIG.JS.PLEASE_JS_TOOL],
-                         "bun": [CONFIG.NODE.BUN_TOOL]}
+                         "bun": [CONFIG.TS.BUN_TOOL]}
 
     return build_rule(
         name = name,
